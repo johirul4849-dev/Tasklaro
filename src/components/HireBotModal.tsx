@@ -1,0 +1,261 @@
+import React, { useState } from 'react';
+import { Bot, Check, Sparkles, X } from 'lucide-react';
+import { AvatarShape, BotTeammate } from '../types/bot';
+
+interface HireBotModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onBotHired: (bot: BotTeammate) => void;
+}
+
+const PRESET_IDEAS = [
+  {
+    title: 'Sales Outbound',
+    prompt: 'Overnight pipeline generation: pick eligible prospects from Google Sheets, research them on the web, check Salesforce ownership, and draft personalized email + LinkedIn sequences.',
+  },
+  {
+    title: 'ইনবক্স ম্যানেজার (Inbox Zero)',
+    prompt: 'Clear my Gmail inbox to zero, archive noise and newsletters, reply to calendar requests, and park drafts in my voice for priority threads.',
+  },
+  {
+    title: 'Code & PR Reviewer',
+    prompt: 'Inspect GitHub pull requests, analyze test coverage, flag regressions, and write clean patch suggestions in the terminal.',
+  },
+  {
+    title: 'Expense & Ramp Auditor',
+    prompt: 'Find missing PDF receipts in Gmail, match them to open Ramp card transactions, code GL departments, and file monthly expense reports.',
+  },
+];
+
+const AVAILABLE_TOOLS = [
+  'Google Sheets',
+  'Gmail',
+  'Salesforce',
+  'LinkedIn',
+  'GitHub',
+  'Terminal',
+  'Ramp',
+  'Web Search',
+];
+
+const COLORFUL_AVATARS: Array<{ shape: AvatarShape; color: string }> = [
+  { shape: 'violet-gem', color: '#8B5CF6' },
+  { shape: 'sunset-coral', color: '#F43F5E' },
+  { shape: 'cyan-orb', color: '#06B6D4' },
+  { shape: 'emerald-badge', color: '#10B981' },
+  { shape: 'amber-star', color: '#F59E0B' },
+  { shape: 'neon-magenta', color: '#EC4899' },
+  { shape: 'circle-teal', color: '#2CB696' },
+  { shape: 'triangle-blue', color: '#3562F4' },
+  { shape: 'diamond-purple', color: '#7A49F5' },
+  { shape: 'circle-orange', color: '#F29938' },
+];
+
+export const HireBotModal: React.FC<HireBotModalProps> = ({
+  isOpen,
+  onClose,
+  onBotHired,
+}) => {
+  const [requirementPrompt, setRequirementPrompt] = useState('');
+  const [selectedTools, setSelectedTools] = useState<string[]>([
+    'Google Sheets',
+    'Gmail',
+    'Web Search',
+  ]);
+  const [isHiring, setIsHiring] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const toggleTool = (tool: string) => {
+    setSelectedTools((prev) =>
+      prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool]
+    );
+  };
+
+  const handleHireSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!requirementPrompt.trim() || isHiring) return;
+
+    setIsHiring(true);
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch('/api/agent/hire', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requirementPrompt }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to configure AI teammate');
+      }
+
+      const spec = await res.json();
+      const nowTime = new Date().toLocaleTimeString([], {
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+
+      // Pick a random vibrant avatar from COLORFUL_AVATARS if not specified
+      const randomAvatar = COLORFUL_AVATARS[Math.floor(Math.random() * COLORFUL_AVATARS.length)];
+
+      const newBot: BotTeammate = {
+        id: `bot-${Date.now()}`,
+        name: spec.name || 'AI Teammate',
+        role: spec.role || 'Autonomous Teammate',
+        avatarShape: spec.avatarShape || randomAvatar.shape,
+        color: spec.color || randomAvatar.color,
+        description: spec.description || requirementPrompt,
+        requiredTools: spec.requiredTools || selectedTools,
+        timestamp: nowTime,
+        sidebarPreview: spec.welcomeMessage || 'Ready for assignments.',
+        timeline: [
+          {
+            id: `time-${Date.now()}`,
+            kind: 'timestamp',
+            text: nowTime,
+          },
+          {
+            id: `msg-${Date.now()}`,
+            kind: 'bot',
+            text: spec.welcomeMessage || `Hey! I am set up as your ${spec.name}. What would you like me to tackle on my computer first?`,
+          },
+        ],
+      };
+
+      onBotHired(newBot);
+      setRequirementPrompt('');
+      onClose();
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Error hiring bot. Please try again.');
+    } finally {
+      setIsHiring(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl border border-neutral-200 shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[92vh]">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-neutral-900 text-white flex items-center justify-center">
+              <Bot className="w-4 h-4" />
+            </div>
+            <div>
+              <h3 className="text-[15px] font-semibold text-neutral-900">
+                Hire a New AI Teammate
+              </h3>
+              <p className="text-[12px] text-neutral-500">
+                Describe the role or condition; Gemini will hire and calibrate an autonomous bot.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Form Body */}
+        <form onSubmit={handleHireSubmit} className="p-5 overflow-y-auto space-y-4">
+          <div>
+            <label className="block text-[13px] font-medium text-neutral-800 mb-1.5">
+              What real work do you want this bot to own?
+            </label>
+            <textarea
+              value={requirementPrompt}
+              onChange={(e) => setRequirementPrompt(e.target.value)}
+              rows={4}
+              placeholder="e.g. 'আমার একটি সেলস আউটবাউন্ড বট দরকার যারা গুগল শিট ও লিঙ্কডইন থেকে লিড রিসার্চ করে সিকোয়েন্স ড্রাফট করবে' or 'I need a customer success bot to scan tickets and pull product telemetry'..."
+              className="w-full p-3 rounded-xl border border-neutral-300 text-[13.5px] text-neutral-900 placeholder:text-neutral-400 focus:outline-none focus:border-neutral-900 leading-relaxed"
+              required
+            />
+          </div>
+
+          {/* Quick Idea Presets */}
+          <div>
+            <div className="text-[12px] font-medium text-neutral-500 mb-1.5 flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5 text-neutral-700" />
+              <span>Or click a role template:</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {PRESET_IDEAS.map((idea, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setRequirementPrompt(idea.prompt)}
+                  className="text-left p-2.5 rounded-xl border border-neutral-200 hover:border-neutral-900 hover:bg-neutral-50/80 transition-colors"
+                >
+                  <div className="text-[12.5px] font-semibold text-neutral-900">{idea.title}</div>
+                  <div className="text-[11px] text-neutral-500 truncate mt-0.5">{idea.prompt}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Tools needed */}
+          <div>
+            <label className="block text-[12.5px] font-medium text-neutral-700 mb-1.5">
+              Tools this bot can access:
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {AVAILABLE_TOOLS.map((tool) => {
+                const isSelected = selectedTools.includes(tool);
+                return (
+                  <button
+                    key={tool}
+                    type="button"
+                    onClick={() => toggleTool(tool)}
+                    className={`px-2.5 py-1 rounded-lg text-[12px] font-medium transition-colors flex items-center gap-1.5 cursor-pointer ${
+                      isSelected
+                        ? 'bg-neutral-900 text-white'
+                        : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+                    }`}
+                  >
+                    {isSelected && <Check className="w-3 h-3" />}
+                    <span>{tool}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[12px]">
+              {errorMessage}
+            </div>
+          )}
+
+          <div className="pt-2 flex items-center justify-end gap-2 border-t border-neutral-100">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl text-[13px] font-medium text-neutral-600 hover:bg-neutral-100 transition-colors cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!requirementPrompt.trim() || isHiring}
+              className="px-5 py-2 rounded-xl text-[13px] font-medium bg-neutral-900 hover:bg-neutral-800 text-white transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-2"
+            >
+              {isHiring ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Hiring & Calibrating Bot...</span>
+                </>
+              ) : (
+                <span>Hire AI Teammate</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};

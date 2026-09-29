@@ -1,0 +1,8 @@
+{
+  "name": "AgentFlow",
+  "description": "AI agents that autonomously access your tools to complete complex tasks and deliver finished work for you.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
