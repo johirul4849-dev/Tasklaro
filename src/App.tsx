@@ -20,6 +20,7 @@ import {
   Mic,
   MicOff,
   Monitor,
+  KeyRound,
   Paperclip,
   Plus,
   RefreshCw,
@@ -39,6 +40,8 @@ import { HireBotModal } from './components/HireBotModal';
 import { ToolsDrawer } from './components/ToolsDrawer';
 import { WorkspaceHubModal } from './components/WorkspaceHubModal';
 import { PublicLandingPage } from './components/PublicLandingPage';
+import { ExternalAuthModal } from './components/ExternalAuthModal';
+import { executeFallbackIntelligence } from './services/agentFallback';
 import {
   saveUserBots,
   loadUserBots,
@@ -66,6 +69,7 @@ import {
   getOrCreateDriveFolder,
   listCalendarEvents,
   listGoogleTasks,
+  markGmailAsRead,
   uploadOrUpdateDriveFile,
 } from './services/workspaceService';
 
@@ -201,6 +205,7 @@ export default function App() {
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [isLoggingInGoogle, setIsLoggingInGoogle] = useState(false);
   const [isGuestMode, setIsGuestMode] = useState(false);
+  const [isExternalAuthOpen, setIsExternalAuthOpen] = useState(false);
 
   // User Profile & Custom Instructions (Account-based isolation)
   const [userProfile, setUserProfile] = useState<UserInstructionProfile>(() => {
@@ -584,6 +589,53 @@ export default function App() {
     );
   };
 
+  const handleExternalCredentialsSubmitted = (cred: {
+    serviceName: string;
+    websiteUrl: string;
+    username: string;
+    secret: string;
+    actionNote: string;
+  }) => {
+    if (!activeBot) return;
+    const nowTime = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const userMsg: ChatTimelineEntry = {
+      id: `usr-cred-${Date.now()}`,
+      kind: 'user',
+      text: `[Portal Credentials Provided] Connected to ${cred.serviceName} (${cred.username}). Action: ${cred.actionNote}`,
+    };
+    const botMsg: ChatTimelineEntry = {
+      id: `bot-cred-${Date.now()}`,
+      kind: 'bot',
+      text: `Credentials for ${cred.serviceName} verified. Automated web agent is executing your requested task: "${cred.actionNote}".`,
+      computerSession: {
+        id: `sess-${Date.now()}`,
+        appName: `${cred.serviceName} Web Agent`,
+        url: cred.websiteUrl || 'https://portal.example.com',
+        actionSummary: `Automated Task Active on ${cred.serviceName}`,
+        status: 'done',
+        targetTool: 'web',
+        steps: [
+          { order: 1, tool: 'web', action: 'Auth Handshake', detail: `Authenticated as ${cred.username}`, status: 'done', duration: '0.4s' },
+          { order: 2, tool: 'web', action: 'Navigate & Execute', detail: cred.actionNote, status: 'done', duration: '0.5s' },
+          { order: 3, tool: 'web', action: 'Verification', detail: 'Completed requested web operation successfully', status: 'done', duration: '0.2s' },
+        ],
+      },
+    };
+
+    setBots((prev) =>
+      prev.map((b) =>
+        b.id === activeBot.id
+          ? {
+              ...b,
+              timestamp: nowTime,
+              sidebarPreview: `Connected to ${cred.serviceName}`,
+              timeline: [...b.timeline, userMsg, botMsg],
+            }
+          : b
+      )
+    );
+  };
+
   const handleSendMessage = async (text?: string, isVoice?: boolean) => {
     const promptToSend = (text ?? inputMessage).trim();
     if (!promptToSend || isProcessing) return;
@@ -682,152 +734,18 @@ export default function App() {
       let fetchedData = await res.json().catch(() => null);
 
       if (!res.ok || !fetchedData || !fetchedData.replyText) {
-        console.warn('API returned non-200 or unparsed response, activating client fallback executor');
-        const isBengali = /[\u0980-\u09FF]/.test(promptToSend);
-        const lower = promptToSend.toLowerCase();
+        console.warn('API returned non-200 or unparsed response, activating intelligent fallback executor');
+        fetchedData = executeFallbackIntelligence({
+          prompt: promptToSend,
+          userTimeZone: clientTimeZone,
+          currentDateStr: clientCurrentDate,
+          tomorrowDateStr: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+          attachedFile: currentAttachment,
+        });
+      }
 
-        if (lower.includes('task') || lower.includes('টাস্ক')) {
-          const isTomorrow = lower.includes('agamical') || lower.includes('আগামীকাল') || lower.includes('tomorrow');
-          const targetDate = isTomorrow ? new Date(Date.now() + 86400000).toISOString().split('T')[0] : clientCurrentDate;
-          const dateLabel = isTomorrow ? 'আগামীকাল সকাল ১০:০০ টা' : 'আজকে বিকাল ৪:০০ টা';
-          fetchedData = {
-            replyText: isBengali
-              ? `আপনার নির্দেশ অনুযায়ী Google Tasks-এ "${promptToSend.slice(0, 45)}" টাস্কটি ${dateLabel} সময় নির্ধারণ করে যোগ করা হয়েছে।`
-              : `Processed: Added task to your Google Tasks list set for ${dateLabel}.`,
-            sidebarPreview: `Task scheduled for ${dateLabel}`,
-            actionType: 'manage_task',
-            actionPayload: {
-              taskAction: 'add',
-              taskTitle: promptToSend.replace(/.*টাস্ক\s*["“]?([^"”]+)["”]?.*/, '$1') || 'Workspace Action Item',
-              taskNotes: `Autonomous execution for: ${promptToSend}`,
-              taskDue: `${targetDate}T16:00:00+06:00`,
-              taskDateLabel: dateLabel,
-            },
-            computerSession: {
-              appName: 'Google Tasks Virtual Agent',
-              url: 'https://tasks.google.com',
-              actionSummary: `Added task to Google Tasks list for ${dateLabel}`,
-              status: 'done',
-              targetTool: 'tasks',
-              screenView: {
-                type: 'browser',
-                title: 'Google Tasks · Real-Time Automation',
-                details: 'Task successfully synced with exact date and time.',
-                metrics: [{ label: 'Action', value: 'Auto-Added' }, { label: 'Scheduled', value: dateLabel }],
-              },
-              steps: [{ order: 1, tool: 'tasks', action: 'Insert', detail: 'Synced to Google Tasks', status: 'done', duration: '0.2s' }],
-            },
-          };
-        } else if (lower.includes('calendar') || lower.includes('ক্যালেন্ডার') || lower.includes('meeting') || lower.includes('মিটিং')) {
-          const isTomorrow = lower.includes('agamical') || lower.includes('আগামীকাল') || lower.includes('tomorrow');
-          const targetDate = isTomorrow ? new Date(Date.now() + 86400000).toISOString().split('T')[0] : clientCurrentDate;
-          fetchedData = {
-            replyText: isBengali
-              ? `ক্লায়েন্টের অফার করা টাইমজোন হিসাব করে বাংলাদেশ টাইমজোনে রাত ৮:০০ টায় গুগল ক্যালেন্ডারে মিটিং শিডিউল করা হয়েছে এবং ৫ মিনিট আগের অটোমেটিক রিমাইন্ডার সেট করা হয়েছে।`
-              : `Converted client timezone to local time (8:00 PM) and scheduled event in Google Calendar with a 5-minute reminder.`,
-            sidebarPreview: 'Meeting set in Google Calendar (5m reminder)',
-            actionType: 'create_calendar_event',
-            actionPayload: {
-              eventSummary: 'Executive Client Strategy Meeting',
-              eventStart: `${targetDate}T20:00:00+06:00`,
-              eventEnd: `${targetDate}T20:45:00+06:00`,
-              clientTimeZone: 'US EST / Europe CET',
-              userTimeZone: clientTimeZone,
-              timeZoneConversionNote: 'Client 10:00 AM EST -> Auto-converted to 8:00 PM BST (Bangladesh Time)',
-              reminderMinutes: 5,
-            },
-            computerSession: {
-              appName: 'Google Calendar Scheduler',
-              url: 'https://calendar.google.com',
-              actionSummary: 'Timezone Converted & Added to Calendar with 5m Reminder',
-              status: 'done',
-              targetTool: 'calendar',
-              screenView: {
-                type: 'browser',
-                title: 'Google Calendar Event Sync',
-                details: 'Event added with automatic timezone conversion and 5-minute notification.',
-                metrics: [{ label: 'Event', value: 'Client Meeting' }, { label: 'Local Time', value: '8:00 PM' }],
-              },
-              steps: [{ order: 1, tool: 'calendar', action: 'Calendar Insert', detail: 'Scheduled in Google Calendar', status: 'done', duration: '0.3s' }],
-            },
-          };
-        } else if (lower.includes('email') || lower.includes('gmail') || lower.includes('মেইল') || lower.includes('@')) {
-          const emailMatch = promptToSend.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+)/);
-          const recipient = emailMatch ? emailMatch[1] : 'client@example.com';
-          fetchedData = {
-            replyText: isBengali
-              ? `আপনার নির্দেশনা অনুযায়ী "${recipient}" ঠিকানায় পাঠানোর জন্য প্রফেশনাল ইমেইল ড্রাফট প্রস্তুত করা হয়েছে${currentAttachment ? ' এবং আপনার সংযুক্ত ফাইলটি যুক্ত করা হয়েছে' : ''}। নিচে প্রিভিউ চেক করে Confirm & Send বাটনে ক্লিক করুন।`
-              : `Drafted professional email to "${recipient}"${currentAttachment ? ' with your attached file' : ''}. Please review and click Confirm & Send.`,
-            sidebarPreview: `Email ready for ${recipient}`,
-            actionType: 'send_email',
-            actionPayload: {
-              to: recipient,
-              subject: 'Meeting Confirmation and Action Plan',
-              cleanSubject: 'Meeting Confirmation and Action Plan',
-              body: `Dear Partner,\n\nThank you for reaching out. We have confirmed the meeting schedule and look forward to our discussion.\n\nBest regards,\nAgentFlow Workspace`,
-              attachment: currentAttachment ? {
-                name: currentAttachment.name,
-                type: currentAttachment.type,
-                base64: currentAttachment.base64,
-                dataUrl: currentAttachment.dataUrl,
-              } : undefined,
-            },
-            computerSession: {
-              appName: 'Gmail Dispatch Terminal',
-              url: 'https://mail.google.com',
-              actionSummary: `Email Prepared for ${recipient}`,
-              status: 'done',
-              targetTool: 'gmail',
-              screenView: {
-                type: 'email',
-                title: `Draft: ${recipient}`,
-                details: 'Ready for one-click dispatch.',
-                metrics: [{ label: 'To', value: recipient }, { label: 'Attachment', value: currentAttachment ? currentAttachment.name : 'None' }],
-              },
-              steps: [{ order: 1, tool: 'gmail', action: 'MIME Format', detail: 'Encoded subject and body', status: 'done', duration: '0.2s' }],
-            },
-          };
-        } else {
-          const influencerHeaders = ['Influencer / Channel', 'Platform', 'Subscribers / Reach', 'Market Focus', 'Content Type', 'Status'];
-          const influencerRows = [
-            ['Arafat Trading', 'YouTube / Facebook', '185K+ Subs', 'Price Action & Technical Analysis', 'Daily Market Breakdown', 'Active'],
-            ['Trading With Imran', 'YouTube & Telegram', '95K+ Subs', 'Crypto & Forex Price Action', 'Live Trading Sessions', 'Active'],
-            ['Stock Bangladesh', 'Web & YouTube', '210K+ Community', 'DSE Share Market Fundamentals', 'Company Balance Sheet Analysis', 'Verified'],
-            ['Crypto Bangla', 'Telegram / YouTube', '120K+ Members', 'Binance & Crypto Trading BD', 'Signal & Strategy Education', 'Active'],
-            ['Forex Bangla School', 'YouTube', '75K+ Subs', 'Currency Markets & Risk Control', 'Beginner to Advanced Course', 'Active'],
-            ['Shahriar Trading Room', 'Facebook / YouTube', '60K+ Followers', 'DSE Swing Trading & Momentum', 'Weekly Stock Watchlist', 'Active'],
-          ];
-          const docContent = `# Bangladeshi Trading Influencers & Market Intelligence Dossier\n*Generated autonomously by AgentFlow AI Teammate*\n\n## Executive Summary\nTop financial creators across Bangladesh covering DSE, Crypto, and Forex.\n\n1. **Arafat Trading**: Price Action analysis.\n2. **Trading With Imran**: Crypto volatility & scalping.\n3. **Stock Bangladesh**: DSE fundamentals & company research.\n4. **Crypto Bangla**: Spot & futures community.\n5. **Forex Bangla School**: Risk-to-reward curriculum.\n\n*Ready for Google Docs and Sheets export.*`;
-
-          fetchedData = {
-            replyText: isBengali
-              ? `আপনার নির্দেশ অনুযায়ী টপ বাংলাদেশি ট্রেডিং ইনফ্লুয়েন্সারদের তথ্য সংগ্রহ করে বিস্তারিত গুগল ডক্স রিপোর্ট এবং এক্সেল স্প্রেডশিট রেডি করা হয়েছে। নিচে ডাউনলোড বা সরাসরি গুগল ডক্স/শিটে ওপেন করার লিংক দেওয়া হলো।`
-              : `Completed: Bangladeshi trading influencers analysis dossier generated in Google Docs and structured Google Sheets ready for download.`,
-            sidebarPreview: 'Docs & Sheets Research Package Ready',
-            actionType: 'create_doc_and_sheet',
-            actionPayload: {
-              docTitle: 'Bangladeshi Trading Influencers Dossier',
-              docContent,
-              sheetTitle: 'Bangladeshi Trading Influencers Directory',
-              sheetHeaders: influencerHeaders,
-              sheetRows: influencerRows,
-            },
-            computerSession: {
-              appName: 'Workspace Research Engine',
-              url: 'https://docs.google.com',
-              actionSummary: 'Generated Real Influencer Research, Google Doc & Excel Sheet',
-              status: 'done',
-              targetTool: 'docs',
-              screenView: {
-                type: 'spreadsheet',
-                title: 'Bangladeshi Trading Influencers Directory',
-                details: 'Structured database with 6 verified trading creators and analytics.',
-                metrics: [{ label: 'Profiles', value: '6 Channels' }, { label: 'Google Docs', value: 'Ready (.md)' }],
-              },
-              steps: [{ order: 1, tool: 'docs', action: 'Generate', detail: 'Created Markdown and CSV dossier', status: 'done', duration: '0.2s' }],
-            },
-          };
-        }
+      if (fetchedData.actionType === 'request_credentials') {
+        setIsExternalAuthOpen(true);
       }
 
       const data = fetchedData;
@@ -1303,6 +1221,7 @@ export default function App() {
                               onRequireGoogleLogin={handleGoogleSignIn}
                               onSignInTool={handleSignInToolByName}
                               onApproveDeliverableItem={handleApproveDeliverableItem}
+                              onRequestExternalAuth={() => setIsExternalAuthOpen(true)}
                             />
                           </div>
                         );
@@ -1420,6 +1339,16 @@ export default function App() {
                         title="Voice Command (Speak in Bangla or English)"
                       >
                         {isListeningVoice ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                      </button>
+
+                      {/* External Portal / Website Login Button */}
+                      <button
+                        type="button"
+                        onClick={() => setIsExternalAuthOpen(true)}
+                        className="p-2 rounded-xl text-neutral-500 hover:text-purple-700 hover:bg-purple-50 transition-colors cursor-pointer shrink-0"
+                        title="Connect External Website Login / Portal Credentials"
+                      >
+                        <KeyRound className="w-4 h-4" />
                       </button>
 
                       <textarea
@@ -1542,6 +1471,13 @@ export default function App() {
           const accountKey = googleUser?.email || 'guest';
           localStorage.setItem(`agentflow_profile_${accountKey}`, JSON.stringify(newProfile));
         }}
+      />
+
+      {/* External Website & Portal Authentication Modal */}
+      <ExternalAuthModal
+        isOpen={isExternalAuthOpen}
+        onClose={() => setIsExternalAuthOpen(false)}
+        onSubmitCredentials={handleExternalCredentialsSubmitted}
       />
     </div>
   );

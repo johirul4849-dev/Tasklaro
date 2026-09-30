@@ -122,6 +122,28 @@ export async function listGmailMessages(
   return parsed;
 }
 
+export async function markGmailAsRead(token: string, messageId: string): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/modify`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          removeLabelIds: ['UNREAD'],
+        }),
+      }
+    );
+    return res.ok;
+  } catch (err) {
+    console.warn('Failed to mark email as read in Gmail:', err);
+    return false;
+  }
+}
+
 export async function sendGmailMessage(
   token: string,
   params: {

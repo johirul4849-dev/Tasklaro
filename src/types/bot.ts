@@ -139,12 +139,12 @@ export interface ComputerSessionData {
   appName: string;
   url: string;
   actionSummary: string;
-  status: 'running' | 'needs_signin' | 'done';
+  status: 'running' | 'needs_signin' | 'needs_permission' | 'done';
   targetTool?: string;
   actionType?: string;
   actionPayload?: ActionPayload;
   artifact?: WorkspaceArtifact;
-  screenView: {
+  screenView?: {
     type: 'browser' | 'spreadsheet' | 'code' | 'email' | 'terminal' | 'dashboard';
     title: string;
     details: string;

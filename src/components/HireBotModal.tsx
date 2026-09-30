@@ -8,22 +8,73 @@ interface HireBotModalProps {
   onBotHired: (bot: BotTeammate) => void;
 }
 
-const PRESET_IDEAS = [
+interface RoleTemplate {
+  title: string;
+  badge: string;
+  prompt: string;
+  tools: string[];
+}
+
+const PRESET_IDEAS: RoleTemplate[] = [
   {
-    title: 'Sales Outbound',
-    prompt: 'Overnight pipeline generation: pick eligible prospects from Google Sheets, research them on the web, check Salesforce ownership, and draft personalized email + LinkedIn sequences.',
+    title: '📅 এক্সিকিউটিভ ক্যালেন্ডার ও মিটিং শিডিউলার',
+    badge: 'Executive',
+    prompt: 'Check Gmail for meeting invites, convert foreign client timezones (EST/CET/GMT) to local time, add events to Google Calendar with 5-minute alerts, mark emails as read to prevent duplicates, and send instant confirmation replies.',
+    tools: ['Google Calendar', 'Gmail', 'Web Search'],
   },
   {
-    title: 'ইনবক্স ম্যানেজার (Inbox Zero)',
-    prompt: 'Clear my Gmail inbox to zero, archive noise and newsletters, reply to calendar requests, and park drafts in my voice for priority threads.',
+    title: '📬 জিমেইল ইনবক্স জিরো স্পেশালিস্ট',
+    badge: 'Email Lead',
+    prompt: 'Clean and manage my Gmail inbox: scan unread messages, categorize urgent business emails, filter noise, mark processed threads as read, and draft clean replies in my voice.',
+    tools: ['Gmail', 'Google Tasks'],
   },
   {
-    title: 'Code & PR Reviewer',
-    prompt: 'Inspect GitHub pull requests, analyze test coverage, flag regressions, and write clean patch suggestions in the terminal.',
+    title: '📊 গুগল শিটস ও ফিনান্সিয়াল অ্যানালিস্ট',
+    badge: 'Sheets & Data',
+    prompt: 'Create, update, and analyze formatted Google Sheets: calculate revenue, build formulas, extract metrics from emails or attachments, and export downloadable CSV spreadsheets.',
+    tools: ['Google Sheets', 'Google Docs', 'Web Search'],
   },
   {
-    title: 'Expense & Ramp Auditor',
-    prompt: 'Find missing PDF receipts in Gmail, match them to open Ramp card transactions, code GL departments, and file monthly expense reports.',
+    title: '📑 গুগল ডক্স ও বিজনেস রিসার্চার',
+    badge: 'Research',
+    prompt: 'Conduct deep market research on web, compile comprehensive executive dossiers in Google Docs with structured headings, bullet points, metrics, and data tables.',
+    tools: ['Google Docs', 'Google Sheets', 'Web Search'],
+  },
+  {
+    title: '🎯 গুগল টাস্কস ও ডেইলি প্রায়োরিটি ট্র্যাকার',
+    badge: 'Tasks & Org',
+    prompt: 'Extract action items from meetings and conversations, schedule them in Google Tasks with exact dates and times, monitor deadlines, and update status.',
+    tools: ['Google Tasks', 'Google Calendar'],
+  },
+  {
+    title: '🤝 ক্লায়েন্ট আউটরিচ ও লিড ফলো-আপ',
+    badge: 'Sales & Client',
+    prompt: 'Draft high-converting personalized outreach emails, schedule follow-up reminders in Google Calendar, track prospect communications, and send verified attachments.',
+    tools: ['Gmail', 'Google Sheets', 'Google Calendar'],
+  },
+  {
+    title: '🌐 ওয়েব অটোমেশন ও এক্সটার্নাল পোর্টাল এজেন্ট',
+    badge: 'Web Agent',
+    prompt: 'Log into external portals and client websites using provided credentials, perform automated form submissions, verify data updates, and report back.',
+    tools: ['Web Search', 'Terminal', 'Gmail'],
+  },
+  {
+    title: '📈 স্টক ও ট্রেডিং ইন্টেলিজেন্স অ্যানালিস্ট',
+    badge: 'Trading & Market',
+    prompt: 'Track Dhaka Stock Exchange (DSE), crypto, and global markets, analyze top trading influencers, build price watchlists in Google Sheets, and summarize technical news.',
+    tools: ['Google Sheets', 'Google Docs', 'Web Search'],
+  },
+  {
+    title: '💡 পার্সোনাল চিফ অব স্টাফ (Chief of Staff)',
+    badge: 'All-in-One',
+    prompt: 'Autonomous general assistant: manage Gmail, schedule Calendar events with 5-minute alerts, organize Google Tasks, write Google Docs reports, and advise on executive decisions in Bengali and English.',
+    tools: ['Gmail', 'Google Calendar', 'Google Tasks', 'Google Docs', 'Google Sheets', 'Web Search'],
+  },
+  {
+    title: '📝 দ্বিভাষিক অনুবাদ ও ডকুমেন্ট এডিটর',
+    badge: 'Editor & Copy',
+    prompt: 'Translate documents seamlessly between Bengali and English, refine corporate correspondence, proofread emails, and format official Google Docs with professional polish.',
+    tools: ['Google Docs', 'Gmail'],
   },
 ];
 
@@ -196,18 +247,32 @@ export const HireBotModal: React.FC<HireBotModalProps> = ({
           <div>
             <div className="text-[12px] font-medium text-neutral-500 mb-1.5 flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5 text-neutral-700" />
-              <span>Or click a role template:</span>
+              <span>Or click a role template ({PRESET_IDEAS.length} Ready Templates):</span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
               {PRESET_IDEAS.map((idea, idx) => (
                 <button
                   key={idx}
                   type="button"
-                  onClick={() => setRequirementPrompt(idea.prompt)}
-                  className="text-left p-2.5 rounded-xl border border-neutral-200 hover:border-neutral-900 hover:bg-neutral-50/80 transition-colors"
+                  onClick={() => {
+                    setRequirementPrompt(idea.prompt);
+                    if (idea.tools && idea.tools.length > 0) {
+                      setSelectedTools(idea.tools);
+                    }
+                  }}
+                  className="text-left p-2.5 rounded-xl border border-neutral-200 hover:border-purple-600 hover:bg-purple-50/40 transition-all cursor-pointer group"
                 >
-                  <div className="text-[12.5px] font-semibold text-neutral-900">{idea.title}</div>
-                  <div className="text-[11px] text-neutral-500 truncate mt-0.5">{idea.prompt}</div>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="text-[12px] font-bold text-neutral-900 group-hover:text-purple-700 truncate">
+                      {idea.title}
+                    </span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200/70 shrink-0">
+                      {idea.badge}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-neutral-500 line-clamp-2 leading-snug">
+                    {idea.prompt}
+                  </div>
                 </button>
               ))}
             </div>
