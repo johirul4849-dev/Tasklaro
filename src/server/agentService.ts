@@ -89,7 +89,7 @@ export async function executeHire(requirementPrompt?: string) {
       throw new Error('GEMINI_API_KEY is not configured');
     }
 
-    const systemPrompt = `You are the AI Teammate Architect for an autonomous agent workspace (Grok Bot style).
+    const systemPrompt = `You are the AI Teammate Architect for an autonomous agent workspace (AgentFlow Teammate style).
 The user wants to hire an AI teammate with this capability:
 "${prompt}"
 
@@ -512,7 +512,7 @@ REQUIRED JSON OUTPUT FORMAT:
     ];
 
     const docContent = `# Bangladeshi Trading Influencers & Market Intelligence Dossier
-*Generated autonomously by AgentFlow Grok Bot Teammate*
+*Generated autonomously by AgentFlow AI Teammate*
 
 ## Executive Summary
 This dossier compiles the most influential financial and trading content creators across Bangladesh, covering the Dhaka Stock Exchange (DSE), Cryptocurrency markets, and Forex trading communities.

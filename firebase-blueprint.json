@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "UserWorkspaceProfile": {
+      "title": "User Workspace Profile",
+      "description": "User account profile, executive identity, and custom AI prompt rules",
+      "type": "object",
+      "properties": {
+        "userEmail": { "type": "string", "format": "email", "description": "Google email address" },
+        "displayName": { "type": "string", "maxLength": 100, "description": "Display name" },
+        "role": { "type": "string", "maxLength": 100, "description": "Professional executive role" },
+        "company": { "type": "string", "maxLength": 100, "description": "Company or workspace name" },
+        "timeZone": { "type": "string", "maxLength": 80, "description": "User local time zone identifier" },
+        "customInstructions": { "type": "string", "maxLength": 2000, "description": "Permanent autonomous AI instructions" },
+        "preferredLanguage": { "type": "string", "maxLength": 50, "description": "Preferred language for AI interaction" },
+        "defaultMeetingDuration": { "type": "number", "description": "Default duration for calendar events in minutes" },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update" }
+      },
+      "required": ["userEmail", "displayName", "timeZone"]
+    },
+    "BotCollection": {
+      "title": "User Bots Collection",
+      "description": "User customized autonomous AI teammates",
+      "type": "object",
+      "properties": {
+        "bots": {
+          "type": "array",
+          "description": "List of hired AI teammate bot objects"
+        },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last sync" }
+      },
+      "required": ["bots"]
+    },
+    "MemoryCollection": {
+      "title": "User Memory Collection",
+      "description": "Activity memory and historical workspace intelligence",
+      "type": "object",
+      "properties": {
+        "memory": {
+          "type": "array",
+          "description": "List of activity memory entries"
+        },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last sync" }
+      },
+      "required": ["memory"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/workspace/profile": {
+      "schema": "UserWorkspaceProfile",
+      "description": "Isolated per-user workspace custom instructions and executive profile"
+    },
+    "/users/{userId}/workspace/bots": {
+      "schema": "BotCollection",
+      "description": "Isolated per-user hired AI teammates and conversation history"
+    },
+    "/users/{userId}/workspace/memory": {
+      "schema": "MemoryCollection",
+      "description": "Isolated per-user activity memory and interaction context"
+    }
+  }
+}

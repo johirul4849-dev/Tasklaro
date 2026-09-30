@@ -38,6 +38,15 @@ import { ComputerCard } from './components/ComputerCard';
 import { HireBotModal } from './components/HireBotModal';
 import { ToolsDrawer } from './components/ToolsDrawer';
 import { WorkspaceHubModal } from './components/WorkspaceHubModal';
+import { PublicLandingPage } from './components/PublicLandingPage';
+import {
+  saveUserBots,
+  loadUserBots,
+  saveUserMemory,
+  loadUserMemory,
+  saveUserProfile,
+  loadUserProfile,
+} from './services/firebaseDb';
 import {
   ActivityMemoryEntry,
   AttachedFileInfo,
@@ -191,6 +200,7 @@ export default function App() {
   const [googleUser, setGoogleUser] = useState<User | null>(null);
   const [googleToken, setGoogleToken] = useState<string | null>(null);
   const [isLoggingInGoogle, setIsLoggingInGoogle] = useState(false);
+  const [isGuestMode, setIsGuestMode] = useState(false);
 
   // User Profile & Custom Instructions (Account-based isolation)
   const [userProfile, setUserProfile] = useState<UserInstructionProfile>(() => {
@@ -285,34 +295,47 @@ export default function App() {
     );
   };
 
-  // Switch profile and memory when Google account changes (Strict Isolation)
+  // Load and switch profile, bots, and memory when Google account changes (Firestore + LocalStorage)
   useEffect(() => {
     const accountKey = googleUser?.email || 'guest';
-    const savedProfile = localStorage.getItem(`agentflow_profile_${accountKey}`);
-    if (savedProfile) {
-      try {
-        setUserProfile(JSON.parse(savedProfile));
-      } catch {}
-    } else if (googleUser) {
-      setUserProfile((prev) => ({
-        ...prev,
-        userEmail: googleUser.email || '',
-        displayName: googleUser.displayName || prev.displayName || 'Workspace User',
-      }));
-    }
+    const uid = googleUser?.uid || '';
 
-    const savedMemory = localStorage.getItem(`agentflow_memory_${accountKey}`);
-    if (savedMemory) {
-      try {
-        setMemoryEntries(JSON.parse(savedMemory));
-      } catch {}
+    // 1. Profile
+    loadUserProfile(uid).then((loadedProf) => {
+      if (loadedProf) {
+        setUserProfile(loadedProf);
+      } else if (googleUser) {
+        setUserProfile((prev) => ({
+          ...prev,
+          userEmail: googleUser.email || '',
+          displayName: googleUser.displayName || prev.displayName || 'Workspace User',
+        }));
+      }
+    });
+
+    // 2. Memory
+    loadUserMemory(uid).then((loadedMem) => {
+      if (loadedMem && loadedMem.length > 0) {
+        setMemoryEntries(loadedMem);
+      }
+    });
+
+    // 3. Bots
+    if (uid) {
+      loadUserBots(uid).then((loadedBots) => {
+        if (loadedBots && loadedBots.length > 0) {
+          setBots(loadedBots);
+          setSelectedBotId(loadedBots[0].id);
+        }
+      });
     }
   }, [googleUser]);
 
-  // Sync bots to localStorage
+  // Sync bots to Firestore & localStorage
   useEffect(() => {
-    localStorage.setItem('agentflow_bots', JSON.stringify(bots));
-  }, [bots]);
+    const uid = googleUser?.uid || '';
+    saveUserBots(uid, bots);
+  }, [bots, googleUser]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -475,17 +498,26 @@ export default function App() {
     await logoutGoogle();
     setGoogleUser(null);
     setGoogleToken(null);
+    setIsGuestMode(false);
     updateToolsConnectedState('', false);
   };
 
   const handleBotHired = (newBot: BotTeammate) => {
-    setBots((prev) => [newBot, ...prev]);
+    setBots((prev) => {
+      const updated = [newBot, ...prev];
+      saveUserBots(googleUser?.uid || '', updated);
+      return updated;
+    });
     setSelectedBotId(newBot.id);
   };
 
   const handleDeleteBot = (botId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setBots((prev) => prev.filter((b) => b.id !== botId));
+    setBots((prev) => {
+      const remaining = prev.filter((b) => b.id !== botId);
+      saveUserBots(googleUser?.uid || '', remaining);
+      return remaining;
+    });
     if (selectedBotId === botId) {
       const remaining = bots.filter((b) => b.id !== botId);
       setSelectedBotId(remaining.length > 0 ? remaining[0].id : null);
@@ -806,6 +838,16 @@ export default function App() {
     }
   };
 
+  if (!googleUser && !isGuestMode) {
+    return (
+      <PublicLandingPage
+        onSignInWithGoogle={handleGoogleSignIn}
+        onEnterAsGuest={() => setIsGuestMode(true)}
+        isLoggingIn={isLoggingInGoogle}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F6F6F4] text-[#111111] flex flex-col font-['Plus_Jakarta_Sans',sans-serif]">
       {/* 5-Minute Meeting / Task Alert Toast */}
@@ -832,12 +874,26 @@ export default function App() {
       {/* Top Header Bar */}
       <header className="h-[54px] px-5 bg-white border-b border-[#E6E6E4] flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <a href="#" className="text-[16px] font-bold tracking-tight text-[#111111]">
+          <button
+            type="button"
+            onClick={() => setIsGuestMode(false)}
+            className="text-[16px] font-bold tracking-tight text-[#111111] hover:text-purple-600 transition-colors cursor-pointer"
+            title="AgentFlow Workspace"
+          >
             AgentFlow
-          </a>
+          </button>
           <span className="hidden sm:inline text-[12px] text-neutral-400">
             · Complete AI Workspace Agent
           </span>
+          {!googleUser && (
+            <button
+              type="button"
+              onClick={() => setIsGuestMode(false)}
+              className="hidden sm:inline-flex text-[11.5px] font-medium text-purple-600 hover:text-purple-800 ml-1 cursor-pointer"
+            >
+              ← Back to Homepage
+            </button>
+          )}
         </div>
 
         {/* Right Google Workspace Authentication Control */}

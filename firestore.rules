@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net: Default Deny All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection validation health-check route
+    match /test/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Isolated User Account Workspace (Strict User Isolation)
+    // Only authenticated Google users can access their own workspace documents
+    match /users/{userId} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      allow read, write: if isOwner();
+
+      match /{subpath=**} {
+        allow read, write: if isOwner();
+      }
+    }
+  }
+}
