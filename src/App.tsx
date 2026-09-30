@@ -650,7 +650,11 @@ export default function App() {
       const data = await res.json().catch(() => null);
 
       if (!res.ok || !data) {
-        const errorText = data?.error || 'Could not complete task with AI agent.';
+        const errorText =
+          data?.error ||
+          (res.status === 404
+            ? 'API endpoint not found (HTTP 404). Please ensure vercel.json is deployed.'
+            : `Could not complete task with AI agent (HTTP ${res.status} ${res.statusText || ''}).`);
         setBots((prev) =>
           prev.map((b) =>
             b.id === targetBotId
@@ -661,7 +665,7 @@ export default function App() {
                     {
                       id: `bot-err-${Date.now()}`,
                       kind: 'bot',
-                      text: `I ran into an issue: ${errorText}. Please verify the task or credentials.`,
+                      text: `I ran into an issue: ${errorText} Please verify the task or credentials.`,
                     },
                   ],
                 }
