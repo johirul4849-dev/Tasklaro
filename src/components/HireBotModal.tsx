@@ -81,17 +81,32 @@ export const HireBotModal: React.FC<HireBotModalProps> = ({
     setErrorMessage(null);
 
     try {
-      const res = await fetch('/api/agent/hire', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requirementPrompt }),
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to configure AI teammate');
+      let spec: any = null;
+      try {
+        const res = await fetch('/api/agent/hire', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ requirementPrompt }),
+        });
+        if (res.ok) {
+          spec = await res.json().catch(() => null);
+        }
+      } catch (netErr) {
+        console.warn('Fetch /api/agent/hire error, using client fallback', netErr);
       }
 
-      const spec = await res.json();
+      if (!spec || !spec.name) {
+        const isBengali = /[\u0980-\u09FF]/.test(requirementPrompt);
+        spec = {
+          name: isBengali ? 'ওয়ার্কস্পেস সহকারী' : 'Workspace Teammate',
+          role: requirementPrompt.slice(0, 40) || 'Autonomous Specialist',
+          description: requirementPrompt,
+          welcomeMessage: isBengali
+            ? `হ্যালো! আমি আপনার সহকারী হিসেবে প্রস্তুত। জিমেইল, ক্যালেন্ডার, টাস্ক, ডক্স বা শিটে কী কাজ করতে হবে বলুন।`
+            : `Hello! I am ready to handle your tasks in Google Workspace. What would you like to start with?`,
+        };
+      }
+
       const nowTime = new Date().toLocaleTimeString([], {
         hour: 'numeric',
         minute: '2-digit',

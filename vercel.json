@@ -4,10 +4,7 @@
   "buildCommand": "vite build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/agent/chat", "destination": "/api/agent/chat" },
-    { "source": "/api/agent/hire", "destination": "/api/agent/hire" },
-    { "source": "/api/(.*)", "destination": "/api/index" },
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api/.*).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/**/*.ts": {
