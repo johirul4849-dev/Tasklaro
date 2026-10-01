@@ -71,9 +71,9 @@ export interface TaskItemPayload {
 // 1. GMAIL API
 export async function listGmailMessages(
   token: string,
-  query: string = 'is:unread'
+  query: string = 'in:inbox'
 ): Promise<ParsedEmailMessage[]> {
-  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=10`;
+  const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=15`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -86,7 +86,7 @@ export async function listGmailMessages(
   const messagesList = data.messages || [];
 
   const parsed: ParsedEmailMessage[] = [];
-  for (const m of messagesList.slice(0, 5)) {
+  for (const m of messagesList.slice(0, 10)) {
     try {
       const msgRes = await fetch(
         `https://gmail.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
@@ -99,9 +99,10 @@ export async function listGmailMessages(
         const from = headers.find((h) => h.name.toLowerCase() === 'from')?.value || 'Unknown Sender';
         const date = headers.find((h) => h.name.toLowerCase() === 'date')?.value || '';
 
+        const combinedText = `${subject} ${fullMsg.snippet || ''}`;
         const isMeeting =
-          /meet|meeting|calendar|zoom|google meet|schedule|appointment|interview|call/i.test(
-            subject + ' ' + (fullMsg.snippet || '')
+          /meet|meeting|calendar|zoom|google meet|schedule|appointment|interview|call|discussion|timing|available|agenda|urgent/i.test(
+            combinedText
           );
 
         parsed.push({

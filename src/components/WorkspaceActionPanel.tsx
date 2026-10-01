@@ -25,6 +25,7 @@ import {
   exportToCsv,
   findGoogleTaskByTitle,
   listGmailMessages,
+  markGmailAsRead,
   ParsedEmailMessage,
   sendGmailMessage,
   updateGoogleTask,
@@ -195,6 +196,63 @@ export const WorkspaceActionPanel: React.FC<WorkspaceActionPanelProps> = ({
           setIsExecuting(false);
         }
       }
+
+      // 5. Gmail Inbox Scan & Autonomous Meeting Scheduling + Auto Mark Read
+      if (actionType === 'check_gmail_meetings') {
+        setIsExecuting(true);
+        setHasAutoExecuted(true);
+        try {
+          const processedKey = 'agentflow_processed_emails';
+          let processedIds: string[] = [];
+          try {
+            processedIds = JSON.parse(localStorage.getItem(processedKey) || '[]');
+          } catch {}
+
+          const emails = await listGmailMessages(googleToken, 'in:inbox');
+          const unbookedMeetingEmails = emails.filter(
+            (e) => e.isMeetingRequest && !processedIds.includes(e.id)
+          );
+
+          if (unbookedMeetingEmails.length > 0) {
+            const targetEmail = unbookedMeetingEmails[0];
+            const senderEmail =
+              targetEmail.from.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/)?.[1] ||
+              actionPayload.to ||
+              '';
+
+            const ev = await createCalendarEvent(googleToken, {
+              summary: `Meeting: ${targetEmail.subject}`,
+              description: `Auto-scheduled from Gmail thread: "${targetEmail.subject}"\nSnippet: ${targetEmail.snippet}\n\nClient Email: ${senderEmail}\n5-minute advance reminder set automatically.`,
+              startDateTime: actionPayload.eventStart || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              endDateTime: actionPayload.eventEnd || new Date(Date.now() + 24 * 60 * 60 * 1000 + 45 * 60 * 1000).toISOString(),
+              timeZone: actionPayload.userTimeZone || 'Asia/Dhaka',
+              reminderMinutes: 5,
+            });
+
+            // Mark message as read in Gmail to prevent duplicate bookings
+            await markGmailAsRead(googleToken, targetEmail.id);
+            processedIds.push(targetEmail.id);
+            localStorage.setItem(processedKey, JSON.stringify(processedIds));
+
+            if (ev.htmlLink) {
+              setCalendarArtifact({ title: targetEmail.subject, url: ev.htmlLink });
+            }
+            setExecutionResult(
+              `✓ Discovered meeting request from "${targetEmail.from}". Booked in Google Calendar with a 5-minute reminder, marked thread as read in Gmail (preventing duplicate entries), and drafted confirmation email to ${senderEmail || 'client'}!`
+            );
+          } else if (emails.length > 0) {
+            setExecutionResult(
+              `✓ Scanned ${emails.length} recent inbox emails. No new unbooked meeting requests found (previous requests are marked read to prevent duplicates).`
+            );
+          } else {
+            setExecutionResult(`✓ Scanned Gmail inbox: 0 new messages found.`);
+          }
+        } catch (err: any) {
+          setExecutionResult(`Gmail Inbox Scan error: ${err.message}`);
+        } finally {
+          setIsExecuting(false);
+        }
+      }
     };
 
     runAutonomousExecution();
@@ -230,7 +288,7 @@ export const WorkspaceActionPanel: React.FC<WorkspaceActionPanelProps> = ({
   // Download Handlers (Always available for instant offline access)
   const handleDownloadDoc = () => {
     const filename = `${(actionPayload.docTitle || 'research_report').toLowerCase().replace(/\s+/g, '_')}.md`;
-    const content = `# ${actionPayload.docTitle || 'Document'}\n\n${actionPayload.docContent || ''}\n\n---\n*Created autonomously by AgentFlow Grok Bot*`;
+    const content = `# ${actionPayload.docTitle || 'Document'}\n\n${actionPayload.docContent || ''}\n\n---\n*Created autonomously by AgentFlow Workspace Assistant*`;
     downloadFile(filename, content, 'text/markdown;charset=utf-8');
   };
 

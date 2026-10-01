@@ -1,5 +1,10 @@
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import {
+  parseNaturalTask,
+  parseEmailFromPrompt,
+  generateTopicResearch,
+} from './smartWorkspaceParser';
 
 dotenv.config();
 
@@ -200,7 +205,10 @@ CRITICAL INTENT CLASSIFICATION RULES:
 5. GOOGLE TASKS:
    - actionType MUST be "manage_task".
    - taskAction: "add" | "edit" | "delete" | "complete".
-   - Resolve dates: "today" -> ${currentDateStr}, "tomorrow" -> ${tomorrowDateStr}.
+   - Clean task title ONLY (e.g. if user says "ajke rat 10:00 pm a rinar sathe diner aca aita task a add koro", the title MUST BE "Dinner with Rina" / "রিনার সাথে ডিনার", NOT the whole prompt!).
+   - Accurately parse the exact time: e.g. "10:00 PM" -> 22:00:00, "9:30 AM" -> 09:30:00. DO NOT default to 4:00 PM!
+   - taskDue: ISO timestamp e.g. "${currentDateStr}T22:00:00+06:00".
+   - taskDateLabel: e.g. "Today at 10:00 PM" / "আজকে রাত ১০:০০ টা".
 
 6. GOOGLE CALENDAR:
    - actionType MUST be "create_calendar_event".
@@ -209,11 +217,14 @@ CRITICAL INTENT CLASSIFICATION RULES:
 
 7. SENDING EMAIL:
    - actionType MUST be "send_email".
-   - Extract recipient "to", clean "subject" (no quotes/markdown), and "body".
+   - Extract the real recipient "to" email address specified by the user. If user did not provide an email, ask for clarification.
+   - Clean "subject" and polite professional "body".
    - If an attached file was supplied, mention it in the body and attachment object.
 
-8. GOOGLE DOCS & GOOGLE SHEETS:
-   - ONLY when the user explicitly requests research, dossiers, spreadsheets, or data tables!
+8. GOOGLE DOCS, GOOGLE SHEETS & RESEARCH (e.g. "top 20 hospital in bangladesh", companies, universities, market research):
+   - ALWAYS generate accurate, realistic, high-quality data for the specific topic requested!
+   - If asked for "top 20 hospital in bangladesh", list REAL premier hospitals in Bangladesh (Evercare Hospital, Square Hospital, United Hospital, DMCH, BSMMU, BIRDEM, NICVD, Labaid, etc.) with accurate Location, Specialty, Capacity, and Hotline!
+   - NEVER return trading influencers unless the user specifically asked for trading influencers!
    - actionType: "create_doc_and_sheet" | "create_doc" | "create_sheet".
 
 9. EXTERNAL WEBSITE LOGIN & AUTOMATION:
@@ -434,15 +445,44 @@ export function executeFallbackIntelligence(params: {
     };
   }
 
-  // 4. SEND EMAIL (Check if recipient email exists; if not, ask for clarification!)
-  if (lower.includes('email') || lower.includes('gmail') || lower.includes('মেইল') || lower.includes('mail')) {
-    const emailMatch = prompt.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+  // 4. GOOGLE TASKS (Exact Natural Time & Clean Title Extraction)
+  if (lower.includes('task') || lower.includes('টাস্ক') || lower.includes('রিমাইন্ডার') || lower.includes('to-do')) {
+    const taskInfo = parseNaturalTask(prompt, currentDateStr, tomorrowDateStr, userTimeZone);
 
-    // If user asked to send email but didn't provide recipient email address:
-    if (!emailMatch && (lower.includes('send') || lower.includes('পাঠাও') || lower.includes('পাঠান') || lower.includes('দাও'))) {
+    return {
+      replyText: isBengali
+        ? `আপনার নির্দেশ অনুযায়ী Google Tasks-এ "${taskInfo.title}" টাস্কটি ${taskInfo.dateLabel} সময় নির্ধারণ করে ${taskInfo.action === 'delete' ? 'মুছে ফেলা' : taskInfo.action === 'edit' ? 'আপডেট' : 'যোগ'} করা হয়েছে।`
+        : `Processed: Google Task "${taskInfo.title}" ${taskInfo.action === 'delete' ? 'deleted from' : taskInfo.action === 'edit' ? 'updated in' : 'added to'} your list set for ${taskInfo.dateLabel}.`,
+      sidebarPreview: `Task ${taskInfo.action === 'delete' ? 'deleted' : 'scheduled'} for ${taskInfo.dateLabel}`,
+      actionType: 'manage_task',
+      actionPayload: {
+        taskAction: taskInfo.action,
+        taskTitle: taskInfo.title,
+        taskNotes: `Autonomous action from: "${prompt}"`,
+        taskDue: taskInfo.dueIso,
+        taskDateLabel: taskInfo.dateLabel,
+      },
+      computerSession: {
+        appName: 'Google Tasks Virtual Agent',
+        actionSummary: `Task "${taskInfo.title}" Synced for ${taskInfo.dateLabel}`,
+        status: 'done',
+        targetTool: 'tasks',
+        steps: [
+          { order: 1, tool: 'tasks', action: 'Parse Command', detail: `Extracted title: "${taskInfo.title}" & Time: ${taskInfo.timeStr}`, status: 'done', duration: '0.1s' },
+          { order: 2, tool: 'tasks', action: taskInfo.action === 'delete' ? 'Delete' : 'Upsert', detail: `Synced to Google Tasks for ${taskInfo.dateLabel}`, status: 'done', duration: '0.3s' },
+        ],
+      },
+    };
+  }
+
+  // 5. SEND EMAIL (Smart recipient & content extraction)
+  if (lower.includes('email') || lower.includes('gmail') || lower.includes('মেইল') || lower.includes('mail')) {
+    const emailData = parseEmailFromPrompt(prompt);
+
+    if (!emailData.recipient && (lower.includes('send') || lower.includes('পাঠাও') || lower.includes('পাঠান') || lower.includes('দাও'))) {
       return {
         replyText: isBengali
-          ? `আমি ইমেইলটি প্রস্তুত করতে প্রস্তুত! কিন্তু দয়া করে প্রাপকের ইমেইল ঠিকানাটি (যেমন: name@company.com) উল্লেখ করুন। অথবা আপনি চাইলে কোনো নির্দিষ্ট কন্ট্যাক্ট বা এক্সেল শিট থেকে আমি খুঁজে নেব কি না তা জানাতে পারেন।`
+          ? `আমি ইমেইলটি প্রস্তুত করতে প্রস্তুত! কিন্তু দয়া করে প্রাপকের সঠিক ইমেইল ঠিকানাটি (যেমন: example@gmail.com) উল্লেখ করুন। অথবা আপনি চাইলে কোনো নির্দিষ্ট কন্ট্যাক্ট বা এক্সেল শিট থেকে আমি খুঁজে নেব কি না তা জানাতে পারেন।`
           : `I am ready to prepare and dispatch the email! However, please specify the recipient's email address (e.g. name@company.com), or let me know if I should extract it from your contacts or a spreadsheet.`,
         sidebarPreview: 'Waiting for recipient email',
         actionType: 'ask_clarification',
@@ -455,25 +495,27 @@ export function executeFallbackIntelligence(params: {
           status: 'needs_permission',
           targetTool: 'gmail',
           steps: [
-            { order: 1, tool: 'agent', action: 'Parse Command', detail: 'Identified email send request', status: 'done', duration: '0.1s' },
+            { order: 1, tool: 'agent', action: 'Parse Command', detail: 'Identified email dispatch request', status: 'done', duration: '0.1s' },
             { order: 2, tool: 'agent', action: 'Check Recipient', detail: 'Missing recipient email address - requesting clarification', status: 'done', duration: '0.1s' },
           ],
         },
       };
     }
 
-    const recipient = emailMatch ? emailMatch[1] : 'client@example.com';
+    const recipient = emailData.recipient || 'recipient@domain.com';
+    const emailBody = `Dear Partner,\n\nI hope this email finds you well.\n\nRegarding your recent request: we have reviewed the details and are moving forward as planned. Please let us know if you require any additional information or have further questions.\n\nBest regards,\nAgentFlow Workspace Assistant`;
+
     return {
       replyText: isBengali
-        ? `আপনার নির্দেশনা অনুযায়ী "${recipient}" ঠিকানায় পাঠানোর জন্য প্রফেশনাল ইমেইল ড্রাফট প্রস্তুত করা হয়েছে${attachedFile ? ' এবং আপনার সংযুক্ত ফাইলটি যুক্ত করা হয়েছে' : ''}। নিচে প্রিভিউ চেক করে Confirm & Send বাটনে ক্লিক করুন।`
-        : `Drafted professional email to "${recipient}"${attachedFile ? ' with your attached file' : ''}. Please review below and click Confirm & Send.`,
+        ? `আপনার নির্দেশনা অনুযায়ী "${recipient}" ঠিকানায় পাঠানোর জন্য প্রফেশনাল ইমেইল ড্রাফট ("${emailData.subject}") প্রস্তুত করা হয়েছে${attachedFile ? ' এবং আপনার সংযুক্ত ফাইলটি যুক্ত করা হয়েছে' : ''}। নিচে প্রিভিউ চেক করে Confirm & Send বাটনে ক্লিক করুন।`
+        : `Drafted professional email to "${recipient}" with subject "${emailData.subject}"${attachedFile ? ' and your attached file' : ''}. Please review below and click Confirm & Send.`,
       sidebarPreview: `Email ready for ${recipient}`,
       actionType: 'send_email',
       actionPayload: {
         to: recipient,
-        subject: 'Meeting Confirmation and Action Plan',
-        cleanSubject: 'Meeting Confirmation and Action Plan',
-        body: `Dear Partner,\n\nThank you for reaching out. We have confirmed the schedule and look forward to our discussion.\n\nBest regards,\nAgentFlow Workspace`,
+        subject: emailData.subject,
+        cleanSubject: emailData.subject,
+        body: emailBody,
         attachment: attachedFile
           ? {
               name: attachedFile.name,
@@ -489,14 +531,14 @@ export function executeFallbackIntelligence(params: {
         status: 'done',
         targetTool: 'gmail',
         steps: [
-          { order: 1, tool: 'gmail', action: 'Format MIME', detail: 'Constructed clean subject and body', status: 'done', duration: '0.2s' },
-          { order: 2, tool: 'gmail', action: 'Attachment Check', detail: attachedFile ? `Attached file: ${attachedFile.name}` : 'No attachment', status: 'done', duration: '0.1s' },
+          { order: 1, tool: 'gmail', action: 'Format MIME', detail: `Clean subject: "${emailData.subject}"`, status: 'done', duration: '0.2s' },
+          { order: 2, tool: 'gmail', action: 'Attachment Check', detail: attachedFile ? `Attached: ${attachedFile.name}` : 'No attachment', status: 'done', duration: '0.1s' },
         ],
       },
     };
   }
 
-  // 5. EXTERNAL WEBSITE / LOGIN TASK
+  // 6. EXTERNAL WEBSITE / LOGIN TASK
   if (lower.includes('login') || lower.includes('লগইন') || lower.includes('website') || lower.includes('portal') || lower.includes('ওয়েবসাইট') || lower.includes('password') || lower.includes('পাসওয়ার্ড')) {
     return {
       replyText: isBengali
@@ -519,42 +561,6 @@ export function executeFallbackIntelligence(params: {
         steps: [
           { order: 1, tool: 'web', action: 'Navigate', detail: 'Located target web portal', status: 'done', duration: '0.2s' },
           { order: 2, tool: 'web', action: 'Auth Check', detail: 'Awaiting secure user credentials', status: 'done', duration: '0.1s' },
-        ],
-      },
-    };
-  }
-
-  // 6. GOOGLE TASKS
-  if (lower.includes('task') || lower.includes('টাস্ক')) {
-    const isTomorrow = lower.includes('agamical') || lower.includes('আগামীকাল') || lower.includes('tomorrow');
-    const targetDate = isTomorrow ? tomorrowDateStr : currentDateStr;
-    const dateLabel = isTomorrow ? 'আগামীকাল সকাল ১০:০০ টা' : 'আজকে বিকাল ৪:০০ টা';
-    const isDelete = lower.includes('delete') || lower.includes('remove') || lower.includes('মুছে') || lower.includes('ডিলিট');
-    const isEdit = lower.includes('edit') || lower.includes('update') || lower.includes('পরিবর্তন') || lower.includes('আপডেট');
-
-    const cleanTitle = prompt.replace(/.*টাস্ক\s*["“]?([^"”]+)["”]?.*/, '$1').replace(/(add|delete|edit|remove)\s*task/i, '').trim() || 'Workspace Priority Task';
-
-    return {
-      replyText: isBengali
-        ? `আপনার নির্দেশ অনুযায়ী Google Tasks-এ "${cleanTitle}" টাস্কটি ${dateLabel} সময় নির্ধারণ করে ${isDelete ? 'মুছে ফেলা' : isEdit ? 'আপডেট' : 'যোগ'} করা হয়েছে।`
-        : `Processed: Google Task "${cleanTitle}" ${isDelete ? 'deleted from' : isEdit ? 'updated in' : 'added to'} your list set for ${dateLabel}.`,
-      sidebarPreview: `Task ${isDelete ? 'deleted' : 'scheduled'} for ${dateLabel}`,
-      actionType: 'manage_task',
-      actionPayload: {
-        taskAction: isDelete ? 'delete' : isEdit ? 'edit' : 'add',
-        taskTitle: cleanTitle,
-        taskNotes: `Autonomous action for: ${prompt}`,
-        taskDue: `${targetDate}T16:00:00+06:00`,
-        taskDateLabel: dateLabel,
-      },
-      computerSession: {
-        appName: 'Google Tasks Virtual Agent',
-        actionSummary: `Task ${isDelete ? 'Removed' : 'Synced'} for ${dateLabel}`,
-        status: 'done',
-        targetTool: 'tasks',
-        steps: [
-          { order: 1, tool: 'tasks', action: 'Verify Auth', detail: 'Connected to Google Tasks API', status: 'done', duration: '0.2s' },
-          { order: 2, tool: 'tasks', action: isDelete ? 'Delete' : 'Upsert', detail: `Processed task "${cleanTitle}" for ${dateLabel}`, status: 'done', duration: '0.3s' },
         ],
       },
     };
@@ -595,72 +601,77 @@ export function executeFallbackIntelligence(params: {
     };
   }
 
-  // 8. GOOGLE DOCS & GOOGLE SHEETS (ONLY when explicitly requested!)
+  // 8. TOPIC RESEARCH, DIRECTORIES, GOOGLE DOCS & GOOGLE SHEETS
   if (
+    lower.includes('hospital') ||
+    lower.includes('হাসপাতাল') ||
+    lower.includes('information') ||
+    lower.includes('তথ্য') ||
+    lower.includes('list') ||
+    lower.includes('তালিকা') ||
+    lower.includes('top') ||
     lower.includes('doc') ||
     lower.includes('sheet') ||
     lower.includes('ডক্স') ||
     lower.includes('শিট') ||
     lower.includes('research') ||
     lower.includes('রিসার্চ') ||
-    lower.includes('influencer') ||
-    lower.includes('ইনফ্লুয়েন্সার') ||
     lower.includes('excel') ||
     lower.includes('এক্সেল')
   ) {
-    const influencerHeaders = ['Influencer / Channel', 'Platform', 'Subscribers / Reach', 'Market Focus', 'Content Type', 'Status'];
-    const influencerRows = [
-      ['Arafat Trading', 'YouTube / Facebook', '185K+ Subs', 'Price Action & Technical Analysis', 'Daily Market Breakdown', 'Active'],
-      ['Trading With Imran', 'YouTube & Telegram', '95K+ Subs', 'Crypto & Forex Price Action', 'Live Trading Sessions', 'Active'],
-      ['Stock Bangladesh', 'Web & YouTube', '210K+ Community', 'DSE Share Market Fundamentals', 'Company Balance Sheet Analysis', 'Verified'],
-      ['Crypto Bangla', 'Telegram / YouTube', '120K+ Members', 'Binance & Crypto Trading BD', 'Signal & Strategy Education', 'Active'],
-      ['Forex Bangla School', 'YouTube', '75K+ Subs', 'Currency Markets & Risk Control', 'Beginner to Advanced Course', 'Active'],
-      ['Shahriar Trading Room', 'Facebook / YouTube', '60K+ Followers', 'DSE Swing Trading & Momentum', 'Weekly Stock Watchlist', 'Active'],
-    ];
-
-    const docContent = `# Executive Dossier & Workspace Report\n*Generated autonomously by AgentFlow AI Teammate*\n\n## Overview\nProcessed research analysis based on your command: "${prompt}".\n\n### Key Highlights\n- Data extracted and organized into structured 2D table.\n- Markdown documentation formatted for Google Docs export.\n- Ready for CSV download and Google Sheets cloud integration.\n\n---`;
+    const research = generateTopicResearch(prompt, isBengali);
 
     return {
       replyText: isBengali
-        ? `আপনার নির্দেশ অনুযায়ী প্রয়োজনীয় তথ্য সংগ্রহ করে বিস্তারিত গুগল ডক্স রিপোর্ট এবং এক্সেল স্প্রেডশিট প্রস্তুত করা হয়েছে। নিচে প্রিভিউ চেক করুন এবং সরাসরি গুগল ডক্স বা শিটে ওপেন করতে পারেন।`
-        : `Completed: Analysis dossier generated in Google Docs and structured Google Sheets ready for review and download.`,
-      sidebarPreview: 'Docs & Sheets Package Ready',
+        ? `আপনার নির্দেশ অনুযায়ী "${research.sheetTitle}" সংক্রান্ত বিস্তারিত তথ্য সংগ্রহ করে গুগল ডক্স রিপোর্ট এবং এক্সেল স্প্রেডশিট প্রস্তুত করা হয়েছে। নিচে প্রিভিউ চেক করুন এবং সরাসরি গুগল ডক্স বা শিটে ওপেন করতে পারেন।`
+        : `Completed: Detailed research report and structured spreadsheet generated for "${research.sheetTitle}". Ready for review and cloud export.`,
+      sidebarPreview: `${research.sheetTitle} Ready`,
       actionType: 'create_doc_and_sheet',
       actionPayload: {
-        docTitle: 'Workspace Research Dossier',
-        docContent,
-        sheetTitle: 'Workspace Data Directory',
-        sheetHeaders: influencerHeaders,
-        sheetRows: influencerRows,
+        docTitle: research.docTitle,
+        docContent: research.docContent,
+        sheetTitle: research.sheetTitle,
+        sheetHeaders: research.sheetHeaders,
+        sheetRows: research.sheetRows,
       },
       computerSession: {
         appName: 'Workspace Intelligence Engine',
-        actionSummary: 'Compiled Google Doc & Formatted Spreadsheet',
+        actionSummary: `Compiled "${research.sheetTitle}" & Formatted Dossier`,
         status: 'done',
         targetTool: 'docs',
         steps: [
-          { order: 1, tool: 'docs', action: 'Generate Document', detail: 'Compiled structured Markdown content', status: 'done', duration: '0.3s' },
-          { order: 2, tool: 'sheets', action: 'Build Spreadsheet', detail: 'Built 2D table with headers and rows', status: 'done', duration: '0.2s' },
+          { order: 1, tool: 'search', action: 'Data Gathering', detail: `Synthesized records for "${research.sheetTitle}"`, status: 'done', duration: '0.3s' },
+          { order: 2, tool: 'docs', action: 'Generate Document', detail: 'Compiled structured Markdown dossier', status: 'done', duration: '0.2s' },
+          { order: 3, tool: 'sheets', action: 'Build Spreadsheet', detail: `Constructed ${research.sheetRows.length} structured rows`, status: 'done', duration: '0.2s' },
         ],
       },
     };
   }
 
-  // 9. DEFAULT SMART RESPONSE (Conversational human-like response instead of forced random research!)
+  // 9. DEFAULT SMART RESPONSE (Dynamic conversational response tailored to user's prompt)
+  const dynamicResearch = generateTopicResearch(prompt, isBengali);
+
   return {
     replyText: isBengali
-      ? `আমি আপনার কমান্ড "${prompt}" মনোযোগ সহকারে বিশ্লেষণ করেছি। আপনি চাইলে আমি:\n১. জিমেইল ইনবক্স চেক করে মিটিংগুলো ক্যালেন্ডারে ৫ মিনিট আগে রিমাইন্ডারসহ বুক করতে পারি।\n২. কাউকে নির্দিষ্ট ইমেইল পাঠাতে পারি।\n৩. গুগল টাস্কস বা ক্যালেন্ডারে ইভেন্ট ম্যানেজ করতে পারি।\n৪. গুগল ডক্স ও শিটস তৈরি করতে পারি।\nঠিক কী করতে হবে বলুন, আমি সাথে সাথে সম্পন্ন করব!`
-      : `I have analyzed your request: "${prompt}". I am ready to:\n1. Check your Gmail inbox for meeting requests and schedule them with 5-minute alerts.\n2. Draft and send emails to any recipient.\n3. Add, edit, or delete items in Google Tasks or Google Calendar.\n4. Build custom Google Docs reports or Google Sheets tables.\nPlease let me know the specific action you would like me to take!`,
-    sidebarPreview: 'Ready for specific action',
-    actionType: 'none',
+      ? `আমি আপনার কমান্ড "${prompt}" মনোযোগ সহকারে বিশ্লেষণ করেছি এবং প্রয়োজনীয় তথ্য দিয়ে ওয়ার্কস্পেস ডসিয়ার ও স্প্রেডশিট প্রস্তুত করেছি। আপনি চাইলে আমি এটি সরাসরি আপনার গুগল ডক্স বা শিটসে সেভ করতে পারি, অথবা জিমেইলে পাঠাতে পারি। কী করতে চান বলুন!`
+      : `I have analyzed your request: "${prompt}" and structured the research dossier and spreadsheet. I can export this to Google Docs/Sheets, schedule reminders in Google Calendar, or dispatch via Gmail. How would you like to proceed?`,
+    sidebarPreview: 'Analysis Complete',
+    actionType: 'create_doc_and_sheet',
+    actionPayload: {
+      docTitle: dynamicResearch.docTitle,
+      docContent: dynamicResearch.docContent,
+      sheetTitle: dynamicResearch.sheetTitle,
+      sheetHeaders: dynamicResearch.sheetHeaders,
+      sheetRows: dynamicResearch.sheetRows,
+    },
     computerSession: {
       appName: 'AgentFlow Assistant',
-      actionSummary: 'Command analyzed and ready for execution',
+      actionSummary: `Command Analyzed: "${prompt.slice(0, 35)}"`,
       status: 'done',
       targetTool: 'search',
       steps: [
         { order: 1, tool: 'agent', action: 'Analyze Intent', detail: `Parsed user command: "${prompt.slice(0, 35)}"`, status: 'done', duration: '0.2s' },
-        { order: 2, tool: 'agent', action: 'Formulate Plan', detail: 'Ready for user confirmation or direct action', status: 'done', duration: '0.1s' },
+        { order: 2, tool: 'agent', action: 'Generate Deliverable', detail: 'Prepared structured data and dossier', status: 'done', duration: '0.2s' },
       ],
     },
   };
