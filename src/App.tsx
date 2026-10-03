@@ -132,57 +132,39 @@ const INITIAL_TOOLS: ToolDefinition[] = [
 
 const DEFAULT_COLORFUL_BOTS: BotTeammate[] = [
   {
-    id: 'bot-lead-1',
-    name: 'Grok Teammate',
-    role: 'Gmail, Tasks, Docs & Sheets Lead',
+    id: 'bot-omni-master',
+    name: 'AgentFlow Omni Super Assistant',
+    role: 'All-in-One Autonomous Workspace Executive',
     avatarShape: 'violet-gem',
     color: '#8B5CF6',
-    description: 'Autonomous workspace agent for email automation, Google Tasks management with dates/times, and Google Docs/Sheets generation.',
-    requiredTools: ['Gmail', 'Google Calendar', 'Google Tasks', 'Google Docs', 'Google Sheets'],
-    timestamp: 'Just now',
-    sidebarPreview: 'Ready for assignments.',
-    timeline: [],
-  },
-  {
-    id: 'bot-analyst-2',
-    name: 'Market & Trading Scout',
-    role: 'Influencer Research & Spreadsheet Dossiers',
-    avatarShape: 'emerald-badge',
-    color: '#10B981',
-    description: 'Researches trading influencers, market intelligence, generates structured Google Docs and CSV/Excel spreadsheets.',
-    requiredTools: ['Google Docs', 'Google Sheets', 'Web Intelligence'],
-    timestamp: '10:00 AM',
-    sidebarPreview: 'Ready for market research briefs.',
-    timeline: [],
-  },
-  {
-    id: 'bot-scheduler-3',
-    name: 'Global Timezone Scheduler',
-    role: 'Calendar Auto-Conversion & 5m Reminders',
-    avatarShape: 'sunset-coral',
-    color: '#F43F5E',
-    description: 'Converts foreign client timezones (EST, CET, GMT) to local Bangladesh time with automatic 5-minute meeting reminders.',
-    requiredTools: ['Google Calendar', 'Gmail'],
-    timestamp: 'Yesterday',
-    sidebarPreview: 'Monitoring calendar & upcoming meetings.',
-    timeline: [],
+    description: 'Unified autonomous AI assistant for Gmail inbox scanning & smart reviews, Google Calendar scheduling (UTC+6 / Bangladesh timezone with 5-min alert), Google Tasks (with exact time & reminder), Google Docs & Sheets (finding, editing, professional colorful design), Web Search, and Computer actions.',
+    requiredTools: ['Gmail', 'Google Calendar', 'Google Tasks', 'Google Docs', 'Google Sheets', 'Web Intelligence'],
+    timestamp: 'Online',
+    sidebarPreview: 'All-in-One Workspace Agent ready for your commands.',
+    timeline: [
+      {
+        id: 'init-msg-1',
+        kind: 'bot',
+        text: 'Hello! I am your Unified Workspace Super Assistant. I have all capabilities (Gmail, Google Calendar with 5-minute reminder and UTC+6 timezone, Google Tasks with exact time alerts, Google Docs & Sheets in Drive with professional colorful design, and Web Intelligence) ready in a single agent. What would you like to accomplish today?',
+      },
+    ],
   },
 ];
 
 export default function App() {
   const [bots, setBots] = useState<BotTeammate[]>(() => {
-    const saved = localStorage.getItem('agentflow_bots');
+    const saved = localStorage.getItem('agentflow_bots_omni_v1');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return [parsed[0]];
       } catch {}
     }
     return DEFAULT_COLORFUL_BOTS;
   });
 
   const [selectedBotId, setSelectedBotId] = useState<string | null>(() => {
-    return bots.length > 0 ? bots[0].id : DEFAULT_COLORFUL_BOTS[0].id;
+    return DEFAULT_COLORFUL_BOTS[0].id;
   });
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -325,12 +307,13 @@ export default function App() {
       }
     });
 
-    // 3. Bots
+    // 3. Bots (Strict Single Unified Super Bot Principle)
     if (uid) {
       loadUserBots(uid).then((loadedBots) => {
         if (loadedBots && loadedBots.length > 0) {
-          setBots(loadedBots);
-          setSelectedBotId(loadedBots[0].id);
+          const singleBot = [loadedBots[0]];
+          setBots(singleBot);
+          setSelectedBotId(singleBot[0].id);
         }
       });
     }
@@ -507,13 +490,13 @@ export default function App() {
     updateToolsConnectedState('', false);
   };
 
-  const handleBotHired = (newBot: BotTeammate) => {
-    setBots((prev) => {
-      const updated = [newBot, ...prev];
-      saveUserBots(googleUser?.uid || '', updated);
-      return updated;
-    });
-    setSelectedBotId(newBot.id);
+  const handleBotHired = (calibratedBot: BotTeammate) => {
+    // Single unified super bot principle: calibrate the single assistant
+    const updated = [calibratedBot];
+    setBots(updated);
+    saveUserBots(googleUser?.uid || '', updated);
+    localStorage.setItem('agentflow_bots_omni_v1', JSON.stringify(updated));
+    setSelectedBotId(calibratedBot.id);
   };
 
   const handleDeleteBot = (botId: string, e: React.MouseEvent) => {
@@ -1000,10 +983,11 @@ export default function App() {
           <button
             type="button"
             onClick={() => setIsHireModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-[12.5px] font-medium hover:bg-neutral-800 transition-colors flex items-center gap-1.5 cursor-pointer"
+            className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-[12.5px] font-medium hover:bg-neutral-800 transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+            title="Configure or calibrate your single unified super assistant"
           >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>+ Hire Bot</span>
+            <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+            <span>⚡ Calibrate AI</span>
           </button>
         </div>
       </header>
@@ -1013,7 +997,7 @@ export default function App() {
         <div className="w-full max-w-[1440px] mx-auto bg-white rounded-[18px] border border-[#E2E2DF] shadow-[0_12px_40px_rgba(0,0,0,0.04)] flex overflow-hidden h-[calc(100vh-88px)]">
           {/* LEFT SIDEBAR: macOS style */}
           <aside className="w-[260px] sm:w-[280px] border-r border-[#EBEBE8] bg-white flex flex-col shrink-0 select-none">
-            {/* Traffic Lights + Hub + "+" Button */}
+            {/* Traffic Lights + Hub + Calibrate Button */}
             <div className="h-[50px] px-3.5 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-[#FF5F57] border border-black/5" />
@@ -1036,9 +1020,9 @@ export default function App() {
                   type="button"
                   onClick={() => setIsHireModalOpen(true)}
                   className="p-1 rounded-md text-neutral-500 hover:text-neutral-900 hover:bg-neutral-100 transition-colors cursor-pointer"
-                  title="Hire a new AI teammate"
+                  title="Calibrate your Unified AI Assistant"
                 >
-                  <Plus className="w-4 h-4 stroke-[2]" />
+                  <Sparkles className="w-4 h-4 text-purple-600" />
                 </button>
               </div>
             </div>
@@ -1099,22 +1083,28 @@ export default function App() {
                           <span className="text-[13.5px] font-semibold text-neutral-900 truncate">
                             {bot.name}
                           </span>
-                          <span className="text-[11px] text-neutral-400 shrink-0 tabular-nums">
-                            {bot.timestamp}
+                          <span className="text-[9.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+                            Super Bot
                           </span>
                         </div>
-                        <p className="text-[12px] text-neutral-500 truncate mt-0.5">
+                        <p className="text-[11.5px] text-neutral-500 truncate mt-0.5">
                           {bot.sidebarPreview}
                         </p>
+                        <div className="flex items-center gap-1 mt-1 text-[9.5px] text-purple-700 font-semibold tracking-tight">
+                          <span>Gmail · Calendar · Tasks · Docs · Sheets</span>
+                        </div>
                       </div>
 
                       <button
                         type="button"
-                        onClick={(e) => handleDeleteBot(bot.id, e)}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-neutral-400 hover:text-red-600 transition-opacity"
-                        title="Remove bot"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsHireModalOpen(true);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-neutral-400 hover:text-purple-600 transition-opacity"
+                        title="Calibrate AI Assistant"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Sliders className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   );

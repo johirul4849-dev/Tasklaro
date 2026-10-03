@@ -45,9 +45,12 @@ export interface ParsedEmailMessage {
   snippet: string;
   subject: string;
   from: string;
+  senderEmail: string;
+  senderName: string;
   date: string;
   bodyText?: string;
   isMeetingRequest?: boolean;
+  isUnread?: boolean;
 }
 
 export interface CalendarEventPayload {
@@ -96,8 +99,15 @@ export async function listGmailMessages(
         const fullMsg = await msgRes.json();
         const headers: GmailEmailHeader[] = fullMsg.payload?.headers || [];
         const subject = headers.find((h) => h.name.toLowerCase() === 'subject')?.value || '(No Subject)';
-        const from = headers.find((h) => h.name.toLowerCase() === 'from')?.value || 'Unknown Sender';
+        const fromRaw = headers.find((h) => h.name.toLowerCase() === 'from')?.value || 'Unknown Sender';
         const date = headers.find((h) => h.name.toLowerCase() === 'date')?.value || '';
+
+        // Extract sender name and clean email address
+        const emailMatch = fromRaw.match(/<([^>]+)>/) || fromRaw.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+        const senderEmail = emailMatch ? emailMatch[1].trim() : fromRaw.trim();
+        const senderName = fromRaw.replace(/<[^>]+>/, '').replace(/["']/g, '').trim() || senderEmail;
+
+        const isUnread = Array.isArray(fullMsg.labelIds) && fullMsg.labelIds.includes('UNREAD');
 
         const combinedText = `${subject} ${fullMsg.snippet || ''}`;
         const isMeeting =
@@ -110,9 +120,12 @@ export async function listGmailMessages(
           threadId: fullMsg.threadId,
           snippet: fullMsg.snippet || '',
           subject,
-          from,
+          from: fromRaw,
+          senderEmail,
+          senderName,
           date,
           isMeetingRequest: isMeeting,
+          isUnread,
         });
       }
     } catch {
@@ -465,7 +478,79 @@ export async function createGoogleDoc(
   };
 }
 
-// 5. GOOGLE SHEETS API (Create Google Spreadsheet and populate rows)
+// 5. GOOGLE SHEETS API (Create Google Spreadsheet, format professionally, and populate rows)
+export async function formatSheetProfessionally(
+  token: string,
+  spreadsheetId: string,
+  rowCount: number = 25,
+  colCount: number = 8
+): Promise<void> {
+  try {
+    const requests = [
+      // 1. Freeze top header row
+      {
+        updateSheetProperties: {
+          properties: {
+            sheetId: 0,
+            gridProperties: {
+              frozenRowCount: 1,
+            },
+          },
+          fields: 'gridProperties.frozenRowCount',
+        },
+      },
+      // 2. Format header row: Rich Deep Navy Blue (#1E3A8A), Bold White Text, Centered
+      {
+        repeatCell: {
+          range: {
+            sheetId: 0,
+            startRowIndex: 0,
+            endRowIndex: 1,
+            startColumnIndex: 0,
+            endColumnIndex: colCount,
+          },
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: { red: 0.117, green: 0.227, blue: 0.541 }, // #1E3A8A
+              textFormat: {
+                bold: true,
+                foregroundColor: { red: 1, green: 1, blue: 1 },
+                fontSize: 11,
+                fontFamily: 'Roboto',
+              },
+              horizontalAlignment: 'CENTER',
+              verticalAlignment: 'MIDDLE',
+            },
+          },
+          fields: 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment)',
+        },
+      },
+      // 3. Auto-resize columns to fit content cleanly
+      {
+        autoResizeDimensions: {
+          dimensions: {
+            sheetId: 0,
+            dimension: 'COLUMNS',
+            startIndex: 0,
+            endIndex: colCount,
+          },
+        },
+      },
+    ];
+
+    await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ requests }),
+    });
+  } catch (err) {
+    console.warn('Sheet professional styling batchUpdate non-fatal error:', err);
+  }
+}
+
 export async function createGoogleSheet(
   token: string,
   params: { title: string; headers: string[]; rows: string[][] }
@@ -506,6 +591,14 @@ export async function createGoogleSheet(
             values: allValues,
           }),
         }
+      );
+
+      // Step 3: Apply professional styling (Navy Header, bold white text, frozen row, auto-column resize)
+      await formatSheetProfessionally(
+        token,
+        spreadsheetId,
+        allValues.length + 5,
+        params.headers.length || 6
       );
     } catch {
       // Fallback
@@ -704,4 +797,165 @@ export async function uploadOrUpdateDriveFile(
     console.error('Drive file upload error:', err);
     throw err;
   }
+}
+
+// 9. GOOGLE DRIVE & DOCS SEARCH & EDIT
+export async function searchDriveFiles(
+  token: string,
+  nameQuery: string
+): Promise<Array<{ id: string; name: string; mimeType: string; webViewLink?: string }>> {
+  const safeName = nameQuery.replace(/'/g, "\\'");
+  const q = `name contains '${safeName}' and trashed=false`;
+  const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name,mimeType,webViewLink)&pageSize=10`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err?.error?.message || 'Failed to search Google Drive files');
+  }
+  const data = await res.json();
+  return data.files || [];
+}
+
+export async function editGoogleDoc(
+  token: string,
+  documentId: string,
+  textToAppend?: string,
+  textToDelete?: string
+): Promise<{ documentId: string; url: string }> {
+  const requests: any[] = [];
+
+  // If textToDelete is specified, delete it using replaceAllText
+  if (textToDelete && textToDelete.trim()) {
+    requests.push({
+      replaceAllText: {
+        containsText: {
+          text: textToDelete.trim(),
+          matchCase: false,
+        },
+        replaceText: '',
+      },
+    });
+  }
+
+  // If textToAppend is specified, insert formatted section
+  if (textToAppend && textToAppend.trim()) {
+    const formattedText = `\n\n═══════════════════════════════════════════════════════════════\n📌 UPDATED SECTION (${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()} UTC+6)\n═══════════════════════════════════════════════════════════════\n${textToAppend.trim()}\n\n[Synchronized autonomously by AgentFlow Workspace Super Assistant]`;
+    requests.push({
+      insertText: {
+        endOfSegmentLocation: {},
+        text: formattedText,
+      },
+    });
+  }
+
+  if (requests.length > 0) {
+    const res = await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ requests }),
+    });
+
+    if (!res.ok) {
+      // Fallback insert if endOfSegmentLocation is not available
+      if (textToAppend) {
+        await fetch(`https://docs.googleapis.com/v1/documents/${documentId}:batchUpdate`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            requests: [
+              {
+                insertText: {
+                  location: { index: 1 },
+                  text: `${textToAppend}\n\n`,
+                },
+              },
+            ],
+          }),
+        });
+      }
+    }
+  }
+
+  return {
+    documentId,
+    url: `https://docs.google.com/document/d/${documentId}/edit`,
+  };
+}
+
+export async function searchAndEditDocument(
+  token: string,
+  docName: string,
+  textToAppend?: string,
+  textToDelete?: string
+): Promise<{ action: 'edited' | 'created'; title: string; url: string }> {
+  const files = await searchDriveFiles(token, docName);
+  if (files.length > 0) {
+    const targetFile = files[0];
+    if (targetFile.mimeType === 'application/vnd.google-apps.document') {
+      const edited = await editGoogleDoc(token, targetFile.id, textToAppend, textToDelete);
+      return { action: 'edited', title: targetFile.name, url: edited.url };
+    } else {
+      const updated = await uploadOrUpdateDriveFile(token, {
+        name: targetFile.name,
+        content: `\n\n${textToAppend || ''}`,
+      });
+      return { action: 'edited', title: targetFile.name, url: updated.url };
+    }
+  }
+
+  const created = await createGoogleDoc(token, {
+    title: docName.endsWith('.docx') || docName.endsWith('.doc') ? docName : `${docName}`,
+    content: textToAppend || 'Created autonomously by AgentFlow Workspace Super Assistant',
+  });
+  return { action: 'created', title: created.title, url: created.url };
+}
+
+export async function searchAndEditSheet(
+  token: string,
+  sheetName: string,
+  rowsToAdd: (string | number)[][],
+  headers?: string[]
+): Promise<{ action: 'edited' | 'created'; title: string; url: string }> {
+  const files = await searchDriveFiles(token, sheetName);
+  const targetFile = files.find((f) => f.mimeType === 'application/vnd.google-apps.spreadsheet');
+  if (targetFile) {
+    if (rowsToAdd.length > 0) {
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${targetFile.id}/values/A1:append?valueInputOption=USER_ENTERED`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ values: rowsToAdd.map((r) => r.map(String)) }),
+        }
+      );
+    }
+    await formatSheetProfessionally(token, targetFile.id, rowsToAdd.length + 10, rowsToAdd[0]?.length || 6);
+    return {
+      action: 'edited',
+      title: targetFile.name,
+      url: targetFile.webViewLink || `https://docs.google.com/spreadsheets/d/${targetFile.id}/edit`,
+    };
+  }
+
+  const created = await createGoogleSheet(token, {
+    title: sheetName,
+    headers: headers || ['Item', 'Category', 'Details', 'Status'],
+    rows: rowsToAdd.map((r) => r.map(String)),
+  });
+  return {
+    action: 'created',
+    title: created.title,
+    url: created.url,
+  };
 }

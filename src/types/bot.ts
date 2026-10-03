@@ -93,6 +93,26 @@ export interface AttachedFileInfo {
   base64?: string;
 }
 
+export interface ImportantEmailItem {
+  id: string;
+  threadId: string;
+  subject: string;
+  from: string;
+  senderEmail: string;
+  senderName: string;
+  date: string;
+  snippet: string;
+  isMeeting: boolean;
+  meetingDateStr?: string;
+  meetingTimeStr?: string;
+  meetingStartIso?: string;
+  meetingEndIso?: string;
+  meetingHumanLabel?: string;
+  draftReplySubject?: string;
+  draftReplyBody?: string;
+  status?: 'pending' | 'booked' | 'replied' | 'completed';
+}
+
 export interface ActionPayload {
   to?: string;
   subject?: string;
@@ -107,21 +127,29 @@ export interface ActionPayload {
   eventSummary?: string;
   eventStart?: string;
   eventEnd?: string;
+  eventStartLabel?: string;
   clientTimeZone?: string;
   userTimeZone?: string;
   timeZoneConversionNote?: string;
   reminderMinutes?: number;
-  taskAction?: 'add' | 'edit' | 'delete' | 'complete';
+  taskAction?: 'add' | 'edit' | 'delete' | 'complete' | 'list';
   taskId?: string;
   taskTitle?: string;
   taskNotes?: string;
   taskDue?: string; // RFC 3339 formatted with date and time
-  taskDateLabel?: string; // e.g. "Today at 4:00 PM" or "Tomorrow at 10:00 AM"
+  taskDateLabel?: string; // e.g. "Today at 10:00 PM"
+  tasksList?: Array<{ id: string; title: string; due?: string; status?: string; notes?: string }>;
   docTitle?: string;
   docContent?: string;
   sheetTitle?: string;
   sheetHeaders?: string[];
   sheetRows?: (string | number)[][];
+  targetDocName?: string;
+  textToAdd?: string;
+  textToDelete?: string;
+  scannedEmails?: Array<any>;
+  importantEmails?: ImportantEmailItem[];
+  normalEmailsCount?: number;
 }
 
 export interface WorkspaceArtifact {

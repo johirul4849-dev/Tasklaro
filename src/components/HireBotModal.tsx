@@ -6,6 +6,7 @@ interface HireBotModalProps {
   isOpen: boolean;
   onClose: () => void;
   onBotHired: (bot: BotTeammate) => void;
+  existingBot?: BotTeammate | null;
 }
 
 interface RoleTemplate {
@@ -106,6 +107,7 @@ export const HireBotModal: React.FC<HireBotModalProps> = ({
   isOpen,
   onClose,
   onBotHired,
+  existingBot,
 }) => {
   const [requirementPrompt, setRequirementPrompt] = useState('');
   const [selectedTools, setSelectedTools] = useState<string[]>([
@@ -167,34 +169,43 @@ export const HireBotModal: React.FC<HireBotModalProps> = ({
       const randomAvatar = COLORFUL_AVATARS[Math.floor(Math.random() * COLORFUL_AVATARS.length)];
 
       const newBot: BotTeammate = {
-        id: `bot-${Date.now()}`,
-        name: spec.name || 'AI Teammate',
-        role: spec.role || 'Autonomous Teammate',
-        avatarShape: spec.avatarShape || randomAvatar.shape,
-        color: spec.color || randomAvatar.color,
-        description: spec.description || requirementPrompt,
+        id: existingBot ? existingBot.id : `bot-${Date.now()}`,
+        name: spec.name || existingBot?.name || 'AgentFlow Master AI',
+        role: spec.role || existingBot?.role || 'All-in-One Workspace Teammate',
+        avatarShape: spec.avatarShape || existingBot?.avatarShape || randomAvatar.shape,
+        color: spec.color || existingBot?.color || randomAvatar.color,
+        description: spec.description || requirementPrompt || existingBot?.description || 'Autonomous Workspace Partner',
         requiredTools: spec.requiredTools || selectedTools,
         timestamp: nowTime,
-        sidebarPreview: spec.welcomeMessage || 'Ready for assignments.',
-        timeline: [
-          {
-            id: `time-${Date.now()}`,
-            kind: 'timestamp',
-            text: nowTime,
-          },
-          {
-            id: `msg-${Date.now()}`,
-            kind: 'bot',
-            text: spec.welcomeMessage || `Hey! I am set up as your ${spec.name}. What would you like me to tackle on my computer first?`,
-          },
-        ],
+        sidebarPreview: spec.welcomeMessage || 'Profile calibrated. Ready for commands.',
+        timeline: existingBot
+          ? [
+              ...existingBot.timeline,
+              {
+                id: `cfg-${Date.now()}`,
+                kind: 'bot',
+                text: `Agent calibrated to: **${spec.name || 'Master AI'}** (${spec.role || 'All-in-One Partner'}). All workspace tools (Gmail, Calendar, Tasks, Docs, Sheets, Drive) are active and ready!`,
+              },
+            ]
+          : [
+              {
+                id: `time-${Date.now()}`,
+                kind: 'timestamp',
+                text: nowTime,
+              },
+              {
+                id: `msg-${Date.now()}`,
+                kind: 'bot',
+                text: spec.welcomeMessage || `Hello! I am your unified AI Workspace teammate. What would you like me to tackle first?`,
+              },
+            ],
       };
 
       onBotHired(newBot);
       setRequirementPrompt('');
       onClose();
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Error hiring bot. Please try again.');
+      setErrorMessage(err?.message || 'Error configuring bot. Please try again.');
     } finally {
       setIsHiring(false);
     }
@@ -211,10 +222,10 @@ export const HireBotModal: React.FC<HireBotModalProps> = ({
             </div>
             <div>
               <h3 className="text-[15px] font-semibold text-neutral-900">
-                Hire a New AI Teammate
+                Configure Unified AI Assistant (All-in-One Super Bot)
               </h3>
               <p className="text-[12px] text-neutral-500">
-                Describe the role or condition; Gemini will hire and calibrate an autonomous bot.
+                Calibrate your single, all-in-one autonomous assistant. It possesses all tools (Gmail, Calendar, Tasks, Docs, Sheets, Search) and executes all workspace jobs.
               </p>
             </div>
           </div>
@@ -327,10 +338,10 @@ export const HireBotModal: React.FC<HireBotModalProps> = ({
               {isHiring ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Hiring & Calibrating Bot...</span>
+                  <span>Calibrating Super Bot...</span>
                 </>
               ) : (
-                <span>Hire AI Teammate</span>
+                <span>Save & Calibrate Super Bot</span>
               )}
             </button>
           </div>

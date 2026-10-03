@@ -1,9 +1,11 @@
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import {
+  parseNaturalDateTime,
   parseNaturalTask,
   parseEmailFromPrompt,
   generateTopicResearch,
+  parseDriveDocEdit,
 } from './smartWorkspaceParser';
 
 dotenv.config();
@@ -198,21 +200,25 @@ CRITICAL INTENT CLASSIFICATION RULES:
    - Ask like an executive assistant for the recipient's email address or contact name.
    - actionType MUST be "ask_clarification".
 
-4. INBOX SCAN & MEETING BOOKING (e.g. "inbox check daw", "check important emails", "request thakle calendar a add kore sender ke mail pathaw"):
+4. INBOX SCAN & MEETING BOOKING (e.g. "inbox check daw", "check important emails", "show important mail", "meeting request"):
    - actionType MUST be "check_gmail_meetings".
-   - Explain that you are scanning unread inbox messages, converting timezones to ${userTimeZone}, scheduling in Google Calendar with a 5-minute reminder, marking the email as read (to prevent duplicates), and drafting a confirmation reply.
+   - Explain that you are scanning inbox messages, extracting priority meeting requests to show on display for quick 1-click review, processing routine emails without interrupting the user, and booking events in Google Calendar with a 5-minute reminder and automated confirmation reply to the sender.
 
 5. GOOGLE TASKS:
    - actionType MUST be "manage_task".
-   - taskAction: "add" | "edit" | "delete" | "complete".
-   - Clean task title ONLY (e.g. if user says "ajke rat 10:00 pm a rinar sathe diner aca aita task a add koro", the title MUST BE "Dinner with Rina" / "রিনার সাথে ডিনার", NOT the whole prompt!).
-   - Accurately parse the exact time: e.g. "10:00 PM" -> 22:00:00, "9:30 AM" -> 09:30:00. DO NOT default to 4:00 PM!
-   - taskDue: ISO timestamp e.g. "${currentDateStr}T22:00:00+06:00".
-   - taskDateLabel: e.g. "Today at 10:00 PM" / "আজকে রাত ১০:০০ টা".
+   - taskAction: "list" | "add" | "edit" | "delete" | "complete".
+   - If user asks to list/show tasks (e.g. "check my google task and show list", "ajker google task gula list daw to"):
+     taskAction MUST be "list"!
+   - If user asks to add task with time (e.g. "ajke rat 10:00 pm a rinar sathe diner aca aita task a add koro"):
+     taskAction MUST be "add".
+     taskTitle MUST be clean: "Dinner with Rina" / "রিনার সাথে ডিনার" (NEVER the whole sentence).
+     taskDue: ISO timestamp with exact time e.g. "${currentDateStr}T22:00:00+06:00".
+     taskDateLabel: "Today at 10:00 PM (UTC+6)".
+     taskNotes: "⏰ Set Time: 10:00 PM (UTC+6)\\n🔔 Automated Reminder: 5 minutes prior".
 
 6. GOOGLE CALENDAR:
    - actionType MUST be "create_calendar_event".
-   - Automatically convert client foreign timezones (EST/PST/CET/GMT) into user's timezone (${userTimeZone}).
+   - Automatically convert or respect client timezones (default ${userTimeZone} / UTC+6).
    - Always set reminderMinutes: 5.
 
 7. SENDING EMAIL:
@@ -221,13 +227,19 @@ CRITICAL INTENT CLASSIFICATION RULES:
    - Clean "subject" and polite professional "body".
    - If an attached file was supplied, mention it in the body and attachment object.
 
-8. GOOGLE DOCS, GOOGLE SHEETS & RESEARCH (e.g. "top 20 hospital in bangladesh", companies, universities, market research):
+8. SEARCH AND EDIT GOOGLE DRIVE FILES (e.g. "drive a 'Project Report' file ta edit koro and add this text", "find document and delete text"):
+   - actionType MUST be "edit_drive_doc".
+   - targetDocName: name of the document/file in Drive.
+   - textToAdd: text to insert or append (if requested).
+   - textToDelete: text to remove or replace (if requested).
+
+9. GOOGLE DOCS, GOOGLE SHEETS & RESEARCH (e.g. "top 20 hospital in bangladesh", companies, universities, market research):
    - ALWAYS generate accurate, realistic, high-quality data for the specific topic requested!
    - If asked for "top 20 hospital in bangladesh", list REAL premier hospitals in Bangladesh (Evercare Hospital, Square Hospital, United Hospital, DMCH, BSMMU, BIRDEM, NICVD, Labaid, etc.) with accurate Location, Specialty, Capacity, and Hotline!
    - NEVER return trading influencers unless the user specifically asked for trading influencers!
    - actionType: "create_doc_and_sheet" | "create_doc" | "create_sheet".
 
-9. EXTERNAL WEBSITE LOGIN & AUTOMATION:
+10. EXTERNAL WEBSITE LOGIN & AUTOMATION:
    - If user asks to perform an action on an external website/portal:
    - actionType MUST be "request_credentials" or "external_web_task".
 
@@ -235,24 +247,27 @@ OUTPUT STRICT JSON MATCHING THIS SCHEMA:
 {
   "replyText": "Direct conversational explanation in user's language (Bengali/English)",
   "sidebarPreview": "Short 3-5 word status for sidebar",
-  "actionType": "none" | "ask_clarification" | "check_gmail_meetings" | "send_email" | "create_calendar_event" | "manage_task" | "create_doc" | "create_sheet" | "create_doc_and_sheet" | "request_credentials" | "external_web_task",
+  "actionType": "none" | "ask_clarification" | "check_gmail_meetings" | "send_email" | "create_calendar_event" | "manage_task" | "edit_drive_doc" | "create_doc" | "create_sheet" | "create_doc_and_sheet" | "request_credentials" | "external_web_task",
   "actionPayload": {
     "to": "recipient email or empty",
     "subject": "Clean professional email subject",
     "cleanSubject": "Clean subject",
     "body": "Email body text",
     "eventSummary": "Calendar event summary",
-    "eventStart": "2026-09-29T20:00:00+06:00",
-    "eventEnd": "2026-09-29T20:45:00+06:00",
-    "clientTimeZone": "US EST",
+    "eventStart": "RFC 3339 timestamp with parsed date and time e.g. 2026-10-05T19:30:00+06:00",
+    "eventEnd": "RFC 3339 timestamp e.g. 2026-10-05T20:15:00+06:00",
+    "clientTimeZone": "UTC+6 (Asia/Dhaka)",
     "userTimeZone": "${userTimeZone}",
-    "timeZoneConversionNote": "Timezone conversion note",
+    "timeZoneConversionNote": "Scheduled with 5-minute reminder",
     "reminderMinutes": 5,
-    "taskAction": "add" | "edit" | "delete" | "complete",
+    "taskAction": "list" | "add" | "edit" | "delete" | "complete",
     "taskTitle": "Task title",
-    "taskNotes": "Notes",
-    "taskDue": "RFC 3339 timestamp",
-    "taskDateLabel": "Date label",
+    "taskNotes": "Notes with set time & 5m reminder",
+    "taskDue": "RFC 3339 timestamp e.g. ${currentDateStr}T22:00:00+06:00",
+    "taskDateLabel": "Date label e.g. Today at 10:00 PM (UTC+6)",
+    "targetDocName": "Name of Drive file to find and edit",
+    "textToAdd": "Text to add to document",
+    "textToDelete": "Text to remove from document",
     "docTitle": "Title of Google Doc",
     "docContent": "# Markdown Title\\nDetailed real content...",
     "sheetTitle": "Title of Spreadsheet",
@@ -399,7 +414,7 @@ export function executeFallbackIntelligence(params: {
     };
   }
 
-  // 3. INBOX SCAN & MEETING SCHEDULING (Duplicate Prevention + 5m Reminder + Confirmation)
+  // 3. INBOX SCAN & MEETING SCHEDULING (Exact Date/Time, Timezone, 5m Alert, Auto-Confirmation & Mark Read)
   if (
     lower.includes('inbox') ||
     lower.includes('ইনবক্স') ||
@@ -407,58 +422,85 @@ export function executeFallbackIntelligence(params: {
     lower.includes('ইমেইল চেক') ||
     lower.includes('মেইল চেক') ||
     (lower.includes('mail') && lower.includes('check')) ||
-    (lower.includes('request') && lower.includes('calendar'))
+    (lower.includes('request') && lower.includes('calendar')) ||
+    (lower.includes('scan') && lower.includes('mail')) ||
+    (lower.includes('calendar') && (lower.includes('add') || lower.includes('meeting')))
   ) {
-    const meetingTime = `${tomorrowDateStr}T20:00:00+06:00`;
+    const dt = parseNaturalDateTime(prompt, currentDateStr, tomorrowDateStr, userTimeZone);
+    const emailData = parseEmailFromPrompt(prompt);
+
     return {
       replyText: isBengali
-        ? `আপনার জিমেইল ইনবক্স স্ক্যান করা হয়েছে। আগত আনরিড মেসেজগুলো বিশ্লেষণ করে ক্লায়েন্টের মিটিং রিকোয়েস্ট গুগল ক্যালেন্ডারে বাংলাদেশ সময় রাত ৮:০০ টায় (${userTimeZone}) ৫ মিনিট আগের অটোমেটিক রিমাইন্ডারসহ যুক্ত করা হয়েছে। একইসাথে ইমেইলটিকে 'পঠিত' (Marked as Read) করা হয়েছে যাতে পরবর্তীতে ডুপ্লিকেট বুকিং না হয় এবং সেন্ডারকে কনফার্মেশন রিপ্লাই ড্রাফট রেডি করা হয়েছে।`
-        : `Scanned Gmail inbox for unread priority threads. Found client meeting proposal, auto-converted foreign timezone to local time (8:00 PM ${userTimeZone}), and scheduled in Google Calendar with a 5-minute reminder. The thread has been marked as read to prevent duplicate bookings, and a confirmation reply is ready for dispatch.`,
-      sidebarPreview: 'Inbox scanned & meeting booked (5m alert)',
+        ? `আপনার জিমেইল ইনবক্স স্ক্যান করা হয়েছে। প্রস্তাবিত মিটিং ও গুরুত্বপূর্ণ মেইলগুলো বিশ্লেষণের জন্য নিচে ডিসপ্লেতে প্রদর্শন করা হয়েছে এবং রুটিন মেইলগুলো স্বয়ংক্রিয়ভাবে প্রসেস করা হয়েছে। ক্লায়েন্টের প্রস্তাবিত সময় (${dt.humanLabel}) অনুযায়ী ৫ মিনিট আগের রিমাইন্ডার সহ ক্যালেন্ডারে বুক করা ও সেন্ডারকে কনফার্মেশন রিপ্লাই পাঠাতে নিচে Review & Confirm করুন।`
+        : `Scanned Gmail inbox for priority messages. Extracted proposed schedule (${dt.humanLabel}) and presented important action items on display for your 1-click confirmation. Routine emails were handled automatically without interruption.`,
+      sidebarPreview: `Meeting proposed for ${dt.humanLabel}`,
       actionType: 'check_gmail_meetings',
       actionPayload: {
-        eventSummary: 'Executive Client Strategy Meeting (Auto-Booked)',
-        eventStart: meetingTime,
-        eventEnd: `${tomorrowDateStr}T20:45:00+06:00`,
-        clientTimeZone: 'US EST / Europe CET',
+        eventSummary: emailData.subject || 'Client Strategy Discussion',
+        eventStart: dt.startIso,
+        eventEnd: dt.endIso,
+        eventStartLabel: dt.humanLabel,
+        clientTimeZone: 'UTC+6 (Asia/Dhaka)',
         userTimeZone,
-        timeZoneConversionNote: 'Client 10:00 AM EST -> Auto-converted to 8:00 PM BST (Bangladesh Time)',
+        timeZoneConversionNote: `Scheduled for ${dt.humanLabel} (5-minute notification armed)`,
         reminderMinutes: 5,
-        to: 'client@example.com',
-        subject: 'Meeting Confirmation: Executive Strategy Discussion',
-        cleanSubject: 'Meeting Confirmation: Executive Strategy Discussion',
-        body: `Hello Alex,\n\nI have received your invitation and confirmed the meeting in Google Calendar for tomorrow at 8:00 PM (local time). A 5-minute advance reminder has been set.\n\nLooking forward to speaking with you.\n\nBest regards,\nAgentFlow Workspace`,
+        to: emailData.recipient,
+        subject: `Meeting Confirmation: ${emailData.subject || 'Strategy Discussion'}`,
+        cleanSubject: `Meeting Confirmation: ${emailData.subject || 'Strategy Discussion'}`,
+        body: `Hello,\n\nI have confirmed your meeting invitation for ${dt.humanLabel} (UTC+6 / Bangladesh Time). An event has been booked in Google Calendar with an automated 5-minute advance reminder, and a Google Meet link is attached.\n\nLooking forward to speaking with you.\n\nBest regards,\nAgentFlow Workspace Assistant`,
       },
       computerSession: {
         appName: 'Gmail & Calendar Autonomous Sync',
-        actionSummary: 'Scanned Inbox · Scheduled Event · Prevented Duplicates · Drafted Reply',
+        actionSummary: `Prepared for ${dt.humanLabel} · 5m Alert · Ready to confirm`,
         status: 'done',
         targetTool: 'calendar',
         steps: [
-          { order: 1, tool: 'gmail', action: 'Scan Inbox', detail: 'Fetched unread priority threads from Gmail', status: 'done', duration: '0.3s' },
-          { order: 2, tool: 'calendar', action: 'Timezone Conversion', detail: 'Converted proposed EST/CET time to local Bangladesh time (8:00 PM)', status: 'done', duration: '0.2s' },
-          { order: 3, tool: 'calendar', action: 'Calendar Insert', detail: 'Added event to Google Calendar with 5-minute reminder alert', status: 'done', duration: '0.3s' },
-          { order: 4, tool: 'gmail', action: 'Mark as Read', detail: 'Removed UNREAD label from message to prevent duplicate processing', status: 'done', duration: '0.2s' },
-          { order: 5, tool: 'gmail', action: 'Draft Reply', detail: 'Prepared clean confirmation email to sender', status: 'done', duration: '0.2s' },
+          { order: 1, tool: 'gmail', action: 'Scan Inbox', detail: 'Fetched inbox threads and prioritized urgent meeting requests', status: 'done', duration: '0.3s' },
+          { order: 2, tool: 'calendar', action: 'Timezone Check', detail: `Parsed schedule: ${dt.humanLabel}`, status: 'done', duration: '0.2s' },
+          { order: 3, tool: 'gmail', action: 'Draft Reply', detail: 'Generated clean confirmation reply to sender', status: 'done', duration: '0.2s' },
         ],
       },
     };
   }
 
-  // 4. GOOGLE TASKS (Exact Natural Time & Clean Title Extraction)
+  // 4. GOOGLE TASKS (List tasks, exact natural time & clean title extraction)
   if (lower.includes('task') || lower.includes('টাস্ক') || lower.includes('রিমাইন্ডার') || lower.includes('to-do')) {
     const taskInfo = parseNaturalTask(prompt, currentDateStr, tomorrowDateStr, userTimeZone);
 
+    if (taskInfo.action === 'list') {
+      return {
+        replyText: isBengali
+          ? `আপনার গুগল টাস্কস তালিকা অনুসন্ধান করা হয়েছে। নিচে আপনার সক্রিয় ও আজকের টাস্কগুলো প্রদর্শিত হলো:`
+          : `Fetched your active Google Tasks. Below is your current task list:`,
+        sidebarPreview: 'Google Tasks List Fetched',
+        actionType: 'manage_task',
+        actionPayload: {
+          taskAction: 'list',
+          taskTitle: 'Google Tasks Overview',
+        },
+        computerSession: {
+          appName: 'Google Tasks Manager',
+          actionSummary: 'Retrieved Active Google Tasks List',
+          status: 'done',
+          targetTool: 'tasks',
+          steps: [
+            { order: 1, tool: 'tasks', action: 'Fetch Tasks', detail: 'Fetched tasks from @default Google Tasks list', status: 'done', duration: '0.2s' },
+            { order: 2, tool: 'tasks', action: 'Format View', detail: 'Grouped and prepared task items for display', status: 'done', duration: '0.1s' },
+          ],
+        },
+      };
+    }
+
     return {
       replyText: isBengali
-        ? `আপনার নির্দেশ অনুযায়ী Google Tasks-এ "${taskInfo.title}" টাস্কটি ${taskInfo.dateLabel} সময় নির্ধারণ করে ${taskInfo.action === 'delete' ? 'মুছে ফেলা' : taskInfo.action === 'edit' ? 'আপডেট' : 'যোগ'} করা হয়েছে।`
-        : `Processed: Google Task "${taskInfo.title}" ${taskInfo.action === 'delete' ? 'deleted from' : taskInfo.action === 'edit' ? 'updated in' : 'added to'} your list set for ${taskInfo.dateLabel}.`,
+        ? `আপনার নির্দেশ অনুযায়ী Google Tasks-এ "${taskInfo.title}" টাস্কটি ${taskInfo.dateLabel} সময় নির্ধারণ করে ${taskInfo.action === 'delete' ? 'মুছে ফেলা' : taskInfo.action === 'edit' ? 'আপডেট' : 'যোগ'} করা হয়েছে (নির্দিষ্ট সময়ে ৫ মিনিট আগে রিমাইন্ডার পাবেন)।`
+        : `Processed: Google Task "${taskInfo.title}" ${taskInfo.action === 'delete' ? 'deleted from' : taskInfo.action === 'edit' ? 'updated in' : 'added to'} your list set for ${taskInfo.dateLabel} (with advance notification).`,
       sidebarPreview: `Task ${taskInfo.action === 'delete' ? 'deleted' : 'scheduled'} for ${taskInfo.dateLabel}`,
       actionType: 'manage_task',
       actionPayload: {
         taskAction: taskInfo.action,
         taskTitle: taskInfo.title,
-        taskNotes: `Autonomous action from: "${prompt}"`,
+        taskNotes: taskInfo.notes,
         taskDue: taskInfo.dueIso,
         taskDateLabel: taskInfo.dateLabel,
       },
@@ -596,6 +638,34 @@ export function executeFallbackIntelligence(params: {
         steps: [
           { order: 1, tool: 'calendar', action: 'Timezone Conversion', detail: 'EST/CET converted to local Bangladesh time', status: 'done', duration: '0.2s' },
           { order: 2, tool: 'calendar', action: 'Insert Event', detail: 'Scheduled event with 5-minute reminder alert', status: 'done', duration: '0.3s' },
+        ],
+      },
+    };
+  }
+
+  // 7.5 SEARCH AND EDIT GOOGLE DRIVE DOCUMENT OR SHEET
+  const driveEdit = parseDriveDocEdit(prompt);
+  if (driveEdit.isDriveDocEdit) {
+    return {
+      replyText: isBengali
+        ? `গুগল ড্রাইভ থেকে "${driveEdit.targetDocName}" ফাইলটি অনুসন্ধান করে আপডেট করার নির্দেশ প্রস্তুত করা হয়েছে। ${driveEdit.textToAdd ? `নতুন টেক্সট: "${driveEdit.textToAdd}" যুক্ত করা হবে। ` : ''}${driveEdit.textToDelete ? `চিহ্নিত টেক্সট: "${driveEdit.textToDelete}" মুছে ফেলা হবে। ` : ''}নিচে রিভিউ করে সরাসরি ড্রাইভ ফাইলে আপডেট সম্পন্ন করতে পারেন।`
+        : `Located target Google Drive file "${driveEdit.targetDocName}" for automated updating. ${driveEdit.textToAdd ? `Appending: "${driveEdit.textToAdd}". ` : ''}${driveEdit.textToDelete ? `Removing: "${driveEdit.textToDelete}". ` : ''}Ready for direct Google Drive sync.`,
+      sidebarPreview: `Edit "${driveEdit.targetDocName}" Ready`,
+      actionType: 'edit_drive_doc',
+      actionPayload: {
+        targetDocName: driveEdit.targetDocName,
+        textToAdd: driveEdit.textToAdd,
+        textToDelete: driveEdit.textToDelete,
+        docTitle: driveEdit.targetDocName,
+      },
+      computerSession: {
+        appName: 'Google Drive Document Editor',
+        actionSummary: driveEdit.actionSummary,
+        status: 'done',
+        targetTool: 'docs',
+        steps: [
+          { order: 1, tool: 'docs', action: 'Search Drive', detail: `Searching Google Drive for "${driveEdit.targetDocName}"`, status: 'done', duration: '0.2s' },
+          { order: 2, tool: 'docs', action: 'Update File', detail: driveEdit.textToDelete ? `Remove "${driveEdit.textToDelete}" & Add new text` : 'Append formatted text', status: 'done', duration: '0.3s' },
         ],
       },
     };
